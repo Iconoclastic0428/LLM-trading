@@ -1,0 +1,14 @@
+{
+  "annualization_sessions": 252,
+  "cash_return_annual": 0.0,
+  "commission_bps": 0.0,
+  "execution": "next_regular_session_open",
+  "max_gross_exposure": 1.0,
+  "max_positions": 10,
+  "max_weight_per_asset": 0.2,
+  "min_order_notional_usd": 1.0,
+  "rebalance_every_bars": 5,
+  "slippage_bps": 5.0,
+  "starting_equity_usd": 10000.0
+}
+

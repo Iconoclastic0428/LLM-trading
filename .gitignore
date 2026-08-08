@@ -1,0 +1,7 @@
+*
+!.gitignore
+!AGENTS.md
+!.codex/
+!.codex/config.toml
+!blind_stock_exam_v3/
+!blind_stock_exam_v3/**

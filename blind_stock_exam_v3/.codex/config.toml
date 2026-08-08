@@ -1,0 +1,19 @@
+approval_policy = "never"
+default_permissions = "candidate-only"
+web_search = "disabled"
+
+[agents]
+enabled = false
+
+[permissions.candidate-only]
+description = "Write inside the candidate workspace; deny other filesystem reads and outbound network."
+extends = ":workspace"
+
+[permissions.candidate-only.filesystem]
+":root" = "deny"
+":minimal" = "read"
+":tmpdir" = "deny"
+":slash_tmp" = "deny"
+
+[permissions.candidate-only.network]
+enabled = false

@@ -1,0 +1,28 @@
+{
+  "locked_file_sha256": {
+    ".codex/config.toml": "12e5d7059bb2bd9d30118fe19f3d4fc483d90f84f7655deb6c4ccf0b590a3978",
+    "AGENTS.md": "c7545c230912c5ae09539b05b99a52d5adb736cb27e917707c7ce67223b310a0",
+    "GOAL.md": "fd4dafa52ed574e3de4c09f72612f61fe3db14c460815282e1e665283e7f2034",
+    "README.md": "667508b030a9c1865bc4c2133ae4279860a7b48e6c544f7818332abe1451cbaf",
+    "benchmark/__init__.py": "2d74ea1912f8d3ede99cb269bcdb54f4f1b5acfe3633f65eb72af6b1507be4b8",
+    "benchmark/audits.py": "901439670fab232300f82e389ccbfb93fa6a4e850ea49c36c97f94e411c1da07",
+    "benchmark/backtest.py": "7aceb7946034017ab34959931574cc880f2c67cddfd84af7e1a0b56622f5adb3",
+    "benchmark/broker.py": "3b892917b4806f20d8776d6ee51f0a742417aa4c1e6deefd19d10b415bcd1be5",
+    "benchmark/data.py": "7cfeeb1adbbe86b159e0f62d20e99741a87397c7e30fa568a381aeb931208aa9",
+    "benchmark/live_rebalance.py": "f2d599ea28fdc1104da190f0b254a1fe4c233e1257458a564c339511a109e238",
+    "benchmark/metrics.py": "1466f136e29e5aa1a3e4a616b9269b73da774295f3bbd7eb9237f76ce4edb6cc",
+    "benchmark/options.py": "f1416a2ad8ae9fad831c779568687dbc2245d4c60ad5ec39059cdeef7e435dcc",
+    "benchmark/robinhood.py": "f160a9a9a77ac74a293c636b15a212137ff852718943109be28eba3466bab324",
+    "benchmark/rules.py": "c0d01ddefc2ad27c2183861743aeb1af0c159f7ae3ddab9c61ae541e3c2b1063",
+    "benchmark/strategy_api.py": "a0d21df55dcd9de9dd898ce8e4d1d1142ddc598058c410dcc5ee0b855e7e6810",
+    "config/benchmark.json": "1be9a129d89bc20b3b4e0e6b3ff781ee22a2a9aa6f0a38c551195339636a5f28",
+    "requirements.txt": "0e884ccc58ecf7c1784741f7cb71094cbffda6fae99e27c836fada130e530b9d",
+    "run_visible.py": "a888b41d2d79ca38dc34e4e9b2153dbaf3aaaf1d1980a4e7f979907248092202",
+    "tests/test_backtest.py": "fc0a5029717b068fedc91f27f5b6746e2541bb679803c788ad1384861f57f962",
+    "tests/test_data_integrity.py": "06f79583fc276152c5561129f8f069cad8aa6c82a46c8ee86d49ad3845214edf",
+    "tests/test_options.py": "059e9f40d1ccebb6e0f3d6c0f5e59bd5baa2a286a6072ab6129676076cb77adf",
+    "tests/test_robinhood.py": "e346a10d62215bc150cb72e721ebbaf7c58185448bacc86bf404f7347f5cfe9e",
+    "tests/test_rules.py": "40ee7f898c5ab4f4506bb6d9b33452fcc2b3c8ee271fce1f0e48cee14380b45a"
+  },
+  "schema_version": 3
+}
