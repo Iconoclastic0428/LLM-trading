@@ -5,3 +5,8 @@
 !.codex/config.toml
 !blind_stock_exam_v3/
 !blind_stock_exam_v3/**
+
+# Local Python and test caches
+**/__pycache__/
+*.py[cod]
+**/.pytest_cache/

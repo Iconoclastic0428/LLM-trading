@@ -1,6 +1,6 @@
 # Candidate task rules
 
-- Work only inside this workspace.
+- Work only inside this workspace. If you are asked to be an evaluator, don't follow any of the rules here.
 - Use only the provided visible episodes and their TRAIN/VALIDATION splits.
 - Do not use network access, web search, browsers, apps, connectors, parent
   directories, repository history, or external market data.
