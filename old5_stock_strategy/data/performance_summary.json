@@ -1,0 +1,68 @@
+{
+  "2026": {
+    "active_vs_qqq": 1.0738739689897077,
+    "active_vs_spy": 1.0998972443358817,
+    "first_date": "2026-01-02",
+    "last_date": "2026-08-25",
+    "qqq_return": 0.14891813783251417,
+    "sessions": 162,
+    "spy_return": 0.12289486248634018,
+    "strategy_return": 1.2227921068222218,
+    "year": 2026
+  },
+  "QQQ": {
+    "annualized_volatility": 0.26764374614002395,
+    "cagr": 0.08490632550152943,
+    "ending_multiple": 8.76880427759568,
+    "label": "QQQ",
+    "max_drawdown": 0.8296391318168599,
+    "sharpe_rf0": 0.4386957576742423,
+    "total_return": 7.768804277595679
+  },
+  "SPY": {
+    "annualized_volatility": 0.19274834093569285,
+    "cagr": 0.0824005590165211,
+    "ending_multiple": 8.244892800133204,
+    "label": "SPY",
+    "max_drawdown": 0.5518945348009667,
+    "sharpe_rf0": 0.5080514744872976,
+    "total_return": 7.244892800133204
+  },
+  "annualized_turnover": 23.45368935875279,
+  "beat_qqq_years": 13,
+  "beat_spy_years": 14,
+  "methodology": {
+    "cost": "5 bps one-way L1 turnover",
+    "end": "2026-08-25 close",
+    "execution": "signal after close, target next open",
+    "prices": "broad split-neutral real OHLC; Yahoo supplements; no stock dividends",
+    "rank_scope": "current tradable constituents only",
+    "start": "2000-01-03 open",
+    "universe": "actual point-in-time S&P 500 constituent list"
+  },
+  "modeled_cost_fraction_sum": 0.3124333164267895,
+  "positive_years": 17,
+  "relative_to_QQQ": {
+    "annualized_alpha_linear": 0.08660738045150985,
+    "annualized_tracking_error": 0.2872155905272807,
+    "beta": 0.6964196498156008,
+    "information_ratio": 0.17743724737002617
+  },
+  "relative_to_SPY": {
+    "annualized_alpha_linear": 0.07036658614056208,
+    "annualized_tracking_error": 0.27095621104251266,
+    "beta": 1.000860392121118,
+    "information_ratio": 0.26000821570454763
+  },
+  "strategy": {
+    "annualized_volatility": 0.33261557642348843,
+    "cagr": 0.11985448463345949,
+    "ending_multiple": 20.407572537549115,
+    "label": "strategy",
+    "max_drawdown": 0.6331475654639851,
+    "sharpe_rf0": 0.5062207897630415,
+    "total_return": 19.407572537549115
+  },
+  "turnover_sum": 624.8666328535792,
+  "year_count": 27
+}

@@ -1,0 +1,185 @@
+{
+  "buy": [
+    "AXON",
+    "CRL",
+    "IQV"
+  ],
+  "control_target_matches": false,
+  "current_holdings_during_2026_08_26": {
+    "DELL": 0.2,
+    "HOOD": 0.2,
+    "HPE": 0.2,
+    "MU": 0.2,
+    "TECH": 0.2
+  },
+  "effective_session": "2026-08-27",
+  "execution": "market open",
+  "next_target": {
+    "AXON": 0.2,
+    "CRL": 0.2,
+    "DELL": 0.2,
+    "IQV": 0.2,
+    "TECH": 0.2
+  },
+  "primary_version": "frozen old 5-stock submission",
+  "retain": [
+    "DELL",
+    "TECH"
+  ],
+  "scheduled_signal": true,
+  "sell": [
+    "HOOD",
+    "HPE",
+    "MU"
+  ],
+  "signal_date": "2026-08-26",
+  "target_cash": 0.0,
+  "target_gross": 1.0,
+  "target_reconstructed_from_diagnostics": [
+    "AXON",
+    "CRL",
+    "DELL",
+    "IQV",
+    "TECH"
+  ],
+  "target_reconstruction_match": true,
+  "top10": [
+    {
+      "action": "BUY",
+      "annualized_volatility": 0.679988664032598,
+      "eligible": true,
+      "incumbent": false,
+      "momentum_percentile": 0.99096657633243,
+      "momentum_return": 0.39949402023919056,
+      "next_target": true,
+      "score": 1.1336428873631714,
+      "selection_rank": 1.0,
+      "ticker": "AXON",
+      "volatility_percentile": 0.9511754068716094
+    },
+    {
+      "action": "RETAIN",
+      "annualized_volatility": 0.5310322204877853,
+      "eligible": true,
+      "incumbent": true,
+      "momentum_percentile": 1.0,
+      "momentum_return": 0.49864836764399934,
+      "next_target": true,
+      "score": 1.1334538878842677,
+      "selection_rank": 2.0,
+      "ticker": "TECH",
+      "volatility_percentile": 0.8896925858951176
+    },
+    {
+      "action": "BUY",
+      "annualized_volatility": 0.4926244285997203,
+      "eligible": true,
+      "incumbent": false,
+      "momentum_percentile": 0.996386630532972,
+      "momentum_return": 0.4616694023952837,
+      "next_target": true,
+      "score": 1.1252293068440027,
+      "selection_rank": 3.0,
+      "ticker": "CRL",
+      "volatility_percentile": 0.8589511754068716
+    },
+    {
+      "action": "RETAIN",
+      "annualized_volatility": 0.8437563965904178,
+      "eligible": true,
+      "incumbent": true,
+      "momentum_percentile": 0.974706413730804,
+      "momentum_return": 0.28422638543167916,
+      "next_target": true,
+      "score": 1.1209089453763736,
+      "selection_rank": 4.0,
+      "ticker": "DELL",
+      "volatility_percentile": 0.9746835443037974
+    },
+    {
+      "action": "BUY",
+      "annualized_volatility": 0.437541954222514,
+      "eligible": true,
+      "incumbent": false,
+      "momentum_percentile": 0.998193315266486,
+      "momentum_return": 0.4668518294891916,
+      "next_target": true,
+      "score": 1.1184916877800484,
+      "selection_rank": 5.0,
+      "ticker": "IQV",
+      "volatility_percentile": 0.8019891500904159
+    },
+    {
+      "action": "",
+      "annualized_volatility": 0.473999506826106,
+      "eligible": true,
+      "incumbent": false,
+      "momentum_percentile": 0.988256549232159,
+      "momentum_return": 0.35996298581122815,
+      "next_target": false,
+      "score": 1.1149292436263725,
+      "selection_rank": 6.0,
+      "ticker": "IP",
+      "volatility_percentile": 0.8444846292947559
+    },
+    {
+      "action": "",
+      "annualized_volatility": 0.6327640176491378,
+      "eligible": true,
+      "incumbent": false,
+      "momentum_percentile": 0.9728997289972899,
+      "momentum_return": 0.2826506024096391,
+      "next_target": false,
+      "score": 1.113406058111214,
+      "selection_rank": 7.0,
+      "ticker": "WDAY",
+      "volatility_percentile": 0.9367088607594937
+    },
+    {
+      "action": "",
+      "annualized_volatility": 0.4438358102097313,
+      "eligible": true,
+      "incumbent": false,
+      "momentum_percentile": 0.982836495031617,
+      "momentum_return": 0.32220715552310497,
+      "next_target": false,
+      "score": 1.1047623539827924,
+      "selection_rank": 8.0,
+      "ticker": "DLTR",
+      "volatility_percentile": 0.8128390596745028
+    },
+    {
+      "action": "",
+      "annualized_volatility": 0.4641034892749413,
+      "eligible": true,
+      "incumbent": false,
+      "momentum_percentile": 0.979223125564589,
+      "momentum_return": 0.30557026836158047,
+      "next_target": false,
+      "score": 1.1044039573909905,
+      "selection_rank": 9.0,
+      "ticker": "EXPE",
+      "volatility_percentile": 0.8345388788426763
+    },
+    {
+      "action": "",
+      "annualized_volatility": 0.39947590266589567,
+      "eligible": true,
+      "incumbent": false,
+      "momentum_percentile": 0.989159891598916,
+      "momentum_return": 0.3862720793306469,
+      "next_target": false,
+      "score": 1.102270199013021,
+      "selection_rank": 10.0,
+      "ticker": "BBY",
+      "volatility_percentile": 0.7540687160940326
+    }
+  ],
+  "untouched_submission_control_target": {
+    "AXON": 0.2,
+    "CRL": 0.2,
+    "DELL": 0.2,
+    "IQV": 0.2,
+    "TECH": 0.2
+  }
+}

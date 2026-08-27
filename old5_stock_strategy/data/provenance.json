@@ -1,0 +1,30 @@
+{
+  "coverage": {
+    "current_signal_after_close": "2026-08-26",
+    "current_signal_effective_open": "2026-08-27",
+    "holdings_end": "2026-08-26",
+    "holdings_start": "2000-01-03",
+    "performance_end": "2026-08-25",
+    "performance_start": "2000-01-03"
+  },
+  "created_at_utc": "2026-08-27T08:31:54.697822+00:00",
+  "methodology": {
+    "execution": "Signal after close; target at next session open",
+    "modeled_cost": "5 basis points one-way L1 turnover",
+    "performance_note": "Audited real-500 point-in-time replay. Its holdings match the frozen submission history through 2026-08-25; the exact frozen 2026-08-26 signal is packaged separately.",
+    "prices": "Broad split-neutral real OHLC with reviewed Yahoo supplements; stock dividends excluded",
+    "universe": "Actual point-in-time S&P 500 constituent list"
+  },
+  "source_sha256": {
+    "annual_performance": "01978986abbd43b9e6a77cf197f2ec15895de81b9dc71b8f8dd4eefb7a9e55d5",
+    "current_target_after_2026-08-26": "188567366e1fc3bf8ddc1862cbabdc0f3fc9a8ced6855a3fd03db8fb475fdd6f",
+    "daily_holdings_through_2026-08-26": "b6443cd645c49646780abe3c1403c12335b5e88eaa74700a7c867bfe90245098",
+    "daily_performance": "00934c2362d2c2c3cf99c64b3364e26bd38d7a94734f5b0119a174cf08099944",
+    "experimental_roles": "bfc86baf2af0b4e008b2d43e2ff2383fb1eae344cb0870bcade080d8e405ca70",
+    "performance_summary": "fbb439cd6a532188335e4b6e6131d81c2d7750d0b149659ed6f1fe8663972179"
+  },
+  "strategy": {
+    "description": "Frozen old five-stock submission",
+    "sha256": "a6c67728eb23ab8f236c3cb813a695e48bf1afa82905477e7aaa26b7f90b5da3"
+  }
+}
