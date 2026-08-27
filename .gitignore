@@ -5,8 +5,8 @@
 !.codex/config.toml
 !blind_stock_exam_v3/
 !blind_stock_exam_v3/**
-!old5_stock_strategy/
-!old5_stock_strategy/**
+!momentum_select_strategy/
+!momentum_select_strategy/**
 
 # Local Python and test caches
 **/__pycache__/
