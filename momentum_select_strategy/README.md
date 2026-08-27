@@ -9,9 +9,9 @@ Signal after the **August 26, 2026 close**, effective at the **August 27 market 
 | Action | Stocks |
 |---|---|
 | Buy | AXON, CRL, IQV |
-| Retain | DELL, TECH |
+| Retain | DELL, MRVL |
 | Sell | HOOD, HPE, MU |
-| Target | AXON 20%, CRL 20%, DELL 20%, IQV 20%, TECH 20% |
+| Target | AXON 20%, CRL 20%, DELL 20%, IQV 20%, MRVL 20% |
 | Cash | 0% |
 
 See signals/current_target_after_2026-08-26.json.
