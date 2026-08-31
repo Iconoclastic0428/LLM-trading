@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/qld-tqqq-signal.yml"
+      - "qld_tqqq_signal_monitor/**"
   schedule:
     - cron: "30 5 * * 2-6"
   workflow_dispatch:
