@@ -2,7 +2,8 @@ name: QLD TQQQ daily signal
 
 on:
   schedule:
-    - cron: "30 5 * * 2-6"
+    - cron: "30 22 * * 1-5"
+      timezone: "America/Los_Angeles"
   workflow_dispatch:
     inputs:
       report_date:
