@@ -40,7 +40,7 @@ def synthetic_prices_with_non_month_end_crash() -> tuple[pd.Series, pd.Series]:
     return qqq, ndx
 
 
-def test_non_month_end_crash_does_not_create_trade() -> None:
+def test_non_month_end_crash_does_not_create_trade_or_publish() -> None:
     qqq, ndx = synthetic_prices_with_non_month_end_crash()
     decision = monitor.build_decision(qqq, ndx, "2026-08-28")
     report = exact_monitor.render_exact_markdown(decision)
@@ -52,6 +52,9 @@ def test_non_month_end_crash_does_not_create_trade() -> None:
     assert "即使当日出现大跌" in report
     assert "| 不调仓 |" in report
     assert payload["strategy_frequency"] == "month_end"
+    assert payload["notification_frequency"] == "month_end_only"
+    assert payload["calendar_poll_frequency"] == "weekday"
+    assert payload["publish_notification"] is False
     assert payload["intramonth_crash_override"] is False
     assert all(
         item["instruction"] == "no_rebalance" for item in payload["decisions"]
@@ -60,7 +63,7 @@ def test_non_month_end_crash_does_not_create_trade() -> None:
     assert all("current_weight" not in item for item in payload["decisions"])
 
 
-def test_month_end_instruction_is_rebalance_to_target() -> None:
+def test_month_end_instruction_is_rebalance_to_target_and_publishable() -> None:
     qqq, ndx = synthetic_prices_with_non_month_end_crash()
     decision = monitor.build_decision(qqq, ndx, "2026-08-31")
     report = exact_monitor.render_exact_markdown(decision)
@@ -72,9 +75,21 @@ def test_month_end_instruction_is_rebalance_to_target() -> None:
     assert "上期月末目标" in report
     assert "按实际账户再平衡至" in report
     assert "当前模型权重" not in report
+    assert payload["publish_notification"] is True
     assert all(
         item["instruction"] == "rebalance_actual_account_to_target"
         for item in payload["decisions"]
     )
     assert all("prior_month_end_target" in item for item in payload["decisions"])
     assert all("target_weight" in item for item in payload["decisions"])
+
+
+def test_workflow_posts_success_only_when_payload_is_publishable() -> None:
+    workflow = (
+        ROOT.parent / ".github" / "workflows" / "qld-tqqq-signal.yml"
+    ).read_text(encoding="utf-8")
+
+    assert workflow.startswith("name: QLD TQQQ monthly signal")
+    assert 'payload.get("publish_notification", False)' in workflow
+    assert "steps.generate.outputs.publish == 'true'" in workflow
+    assert "Post month-end signal or validation failure" in workflow

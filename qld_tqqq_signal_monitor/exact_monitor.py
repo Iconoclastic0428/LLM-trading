@@ -16,6 +16,11 @@ def exact_payload(decision: monitor.DailyDecision) -> dict:
 
     payload = decision.to_dict()
     payload["strategy_frequency"] = "month_end"
+    payload["notification_frequency"] = "month_end_only"
+    payload["calendar_poll_frequency"] = "weekday"
+    payload["publish_notification"] = bool(
+        decision.market_status == "open" and decision.is_month_end
+    )
     payload["intramonth_rebalance"] = False
     payload["intramonth_crash_override"] = False
     payload["execution_rule"] = "next_session_open"
