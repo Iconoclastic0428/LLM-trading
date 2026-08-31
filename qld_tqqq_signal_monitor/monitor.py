@@ -20,8 +20,8 @@ from urllib3.util.retry import Retry
 
 FRED_NDX_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQ100"
 YAHOO_QQQ_URLS = (
-    "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?range=max&interval=1d&events=history&includeAdjustedClose=true",
-    "https://query2.finance.yahoo.com/v8/finance/chart/QQQ?range=max&interval=1d&events=history&includeAdjustedClose=true",
+    "https://query1.finance.yahoo.com/v8/finance/chart/QQQ",
+    "https://query2.finance.yahoo.com/v8/finance/chart/QQQ",
 )
 MARKET_TIMEZONE = "America/New_York"
 CALENDAR_NAME = "XNYS"
@@ -170,9 +170,19 @@ def fetch_ndx_close(session: requests.Session | None = None) -> pd.Series:
 def fetch_qqq_close(session: requests.Session | None = None) -> pd.Series:
     session = session or _http_session()
     errors: list[str] = []
+    period1 = int(datetime(1999, 3, 1, tzinfo=ZoneInfo("UTC")).timestamp())
+    period2 = int((datetime.now(ZoneInfo("UTC")) + timedelta(days=3)).timestamp())
+    params = {
+        "period1": period1,
+        "period2": period2,
+        "interval": "1d",
+        "events": "div,splits",
+        "includePrePost": "false",
+        "includeAdjustedClose": "true",
+    }
     for url in YAHOO_QQQ_URLS:
         try:
-            response = session.get(url, timeout=(10, 45))
+            response = session.get(url, params=params, timeout=(10, 45))
         except requests.RequestException as exc:
             errors.append(f"request failed: {exc}")
             continue
