@@ -1,0 +1,76 @@
+name: QLD TQQQ daily signal
+
+on:
+  schedule:
+    - cron: "30 5 * * 2-6"
+  workflow_dispatch:
+    inputs:
+      report_date:
+        description: "Optional report date in YYYY-MM-DD"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: qld-tqqq-daily-signal
+  cancel-in-progress: false
+
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: qld_tqqq_signal_monitor/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r qld_tqqq_signal_monitor/requirements.txt
+
+      - name: Run tests
+        run: python -m pytest qld_tqqq_signal_monitor/tests
+
+      - name: Generate signal
+        id: generate
+        shell: bash
+        run: |
+          set +e
+          REPORT_DATE="${{ github.event.inputs.report_date }}"
+          if [[ -n "$REPORT_DATE" ]]; then
+            python qld_tqqq_signal_monitor/monitor.py --report-date "$REPORT_DATE"
+          else
+            python qld_tqqq_signal_monitor/monitor.py
+          fi
+          STATUS=$?
+          set -e
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          cat signal_output/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post one issue comment per report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: "1"
+        shell: bash
+        run: |
+          MARKER="$(grep -m1 '^<!-- qld-tqqq-signal:' signal_output/report.md)"
+          if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            --jq '.[].body' | grep -Fq "$MARKER"; then
+            echo "A comment with marker $MARKER already exists."
+          else
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body-file signal_output/report.md
+          fi
+
+      - name: Fail workflow when signal generation failed
+        if: steps.generate.outputs.status != '0'
+        run: exit 1
