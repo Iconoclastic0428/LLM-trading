@@ -1,6 +1,9 @@
 name: QLD TQQQ daily signal
 
 on:
+  push:
+    branches:
+      - audit/exact-monthly-signal
   schedule:
     - cron: "30 22 * * 1-5"
       timezone: "America/Los_Angeles"
