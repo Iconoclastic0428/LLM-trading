@@ -1,7 +1,9 @@
-name: QLD TQQQ daily signal
+name: QLD TQQQ monthly signal
 
 on:
   schedule:
+    # Calendar-aware monitoring runs after each U.S. weekday. Successful issue
+    # updates are published only when the resolved report is a month-end session.
     - cron: "30 22 * * 1-5"
       timezone: "America/Los_Angeles"
   workflow_dispatch:
@@ -16,7 +18,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: qld-tqqq-daily-signal
+  group: qld-tqqq-monthly-signal
   cancel-in-progress: false
 
 jobs:
@@ -54,10 +56,18 @@ jobs:
           fi
           STATUS=$?
           set -e
+
+          PUBLISH="false"
+          if [[ "$STATUS" == "0" ]]; then
+            PUBLISH="$(python -c 'import json; payload=json.load(open("signal_output/signal.json", encoding="utf-8")); print("true" if payload.get("publish_notification", False) else "false")')"
+          fi
+
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
           cat signal_output/report.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Post one issue comment per report
+      - name: Post month-end signal or validation failure
+        if: ${{ always() && (steps.generate.outputs.publish == 'true' || steps.generate.outputs.status != '0') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: "1"
