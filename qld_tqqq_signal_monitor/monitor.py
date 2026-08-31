@@ -225,7 +225,9 @@ def validate_cross_source(qqq: pd.Series, ndx: pd.Series, report_date: pd.Timest
             f"NASDAQ-100 data for {report_date.date()} is unavailable; latest is {ndx.index.max().date()}."
         )
     common = pd.concat(
-        [qqq.pct_change().rename("qqq"), ndx.pct_change().rename("ndx")], axis=1
+        [qqq.pct_change().rename("qqq"), ndx.pct_change().rename("ndx")],
+        axis=1,
+        sort=False,
     ).dropna().loc[:report_date].tail(60)
     if len(common) < 40:
         raise MonitorError("Insufficient overlapping QQQ/NDX rows for source validation.")
@@ -357,8 +359,12 @@ def latest_completed_report_date(now: datetime | None = None) -> pd.Timestamp:
 
 def _month_end_sessions(start: pd.Timestamp, report: pd.Timestamp) -> pd.DatetimeIndex:
     calendar = _calendar()
+    first_session = pd.Timestamp(calendar.first_session)
+    if first_session.tz is not None:
+        first_session = first_session.tz_localize(None)
+    effective_start = max(start, first_session.normalize())
     sessions = _normalize_sessions(
-        calendar.sessions_in_range(start, report + pd.offsets.MonthEnd(1))
+        calendar.sessions_in_range(effective_start, report + pd.offsets.MonthEnd(1))
     )
     frame = pd.DataFrame(index=sessions)
     month_ends = frame.groupby(frame.index.to_period("M")).tail(1).index
