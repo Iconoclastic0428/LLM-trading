@@ -11,13 +11,45 @@ def _percent(value: float) -> str:
     return f"{value * 100:.2f}%"
 
 
+def exact_payload(decision: monitor.DailyDecision) -> dict:
+    """Return structured output without treating a prior target as a live weight."""
+
+    payload = decision.to_dict()
+    payload["strategy_frequency"] = "month_end"
+    payload["intramonth_rebalance"] = False
+    payload["intramonth_crash_override"] = False
+    payload["execution_rule"] = "next_session_open"
+    payload["actual_account_weights_available"] = False
+
+    instruction = (
+        "rebalance_actual_account_to_target"
+        if decision.is_month_end and decision.market_status == "open"
+        else "no_rebalance"
+    )
+    normalized_decisions: list[dict] = []
+    for item in payload.get("decisions", []):
+        normalized_decisions.append(
+            {
+                "symbol": item["symbol"],
+                "prior_month_end_target": item["current_weight"],
+                "target_weight": item["new_weight"],
+                "target_change": item["delta_weight"],
+                "defensive_weight": item["defensive_weight"],
+                "actual_account_weight": None,
+                "instruction": instruction,
+            }
+        )
+    payload["decisions"] = normalized_decisions
+    return payload
+
+
 def render_exact_markdown(decision: monitor.DailyDecision) -> str:
     """Render instructions that preserve the backtested monthly execution rule.
 
     The prior month-end target is not the account's current weight because ETF and
-    defensive holdings drift between rebalance dates.  Without brokerage holdings,
-    the only exact executable instruction is to rebalance the actual account to the
-    newly calculated target on a month-end execution date.
+    defensive holdings drift between rebalance dates. Without brokerage holdings,
+    the exact executable instruction is to rebalance the actual account to the newly
+    calculated target on a month-end execution date.
     """
 
     marker = f"<!-- qld-tqqq-signal:{decision.report_date}:success -->"
@@ -130,7 +162,7 @@ def render_exact_markdown(decision: monitor.DailyDecision) -> str:
 def write_exact_outputs(decision: monitor.DailyDecision, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "signal.json").write_text(
-        json.dumps(decision.to_dict(), ensure_ascii=False, indent=2) + "\n",
+        json.dumps(exact_payload(decision), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     (output_dir / "report.md").write_text(
