@@ -41,16 +41,16 @@ jobs:
       - name: Run tests
         run: python -m pytest qld_tqqq_signal_monitor/tests
 
-      - name: Generate signal
+      - name: Generate exact monthly-strategy signal
         id: generate
         shell: bash
         run: |
           set +e
           REPORT_DATE="${{ github.event.inputs.report_date }}"
           if [[ -n "$REPORT_DATE" ]]; then
-            python qld_tqqq_signal_monitor/monitor.py --report-date "$REPORT_DATE"
+            python qld_tqqq_signal_monitor/exact_monitor.py --report-date "$REPORT_DATE"
           else
-            python qld_tqqq_signal_monitor/monitor.py
+            python qld_tqqq_signal_monitor/exact_monitor.py
           fi
           STATUS=$?
           set -e
