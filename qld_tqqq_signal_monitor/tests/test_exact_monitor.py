@@ -44,18 +44,27 @@ def test_non_month_end_crash_does_not_create_trade() -> None:
     qqq, ndx = synthetic_prices_with_non_month_end_crash()
     decision = monitor.build_decision(qqq, ndx, "2026-08-28")
     report = exact_monitor.render_exact_markdown(decision)
+    payload = exact_monitor.exact_payload(decision)
 
     assert decision.is_month_end is False
     assert all(item.current_weight == item.new_weight for item in decision.decisions)
     assert "今日不调仓" in report
     assert "即使当日出现大跌" in report
     assert "| 不调仓 |" in report
+    assert payload["strategy_frequency"] == "month_end"
+    assert payload["intramonth_crash_override"] is False
+    assert all(
+        item["instruction"] == "no_rebalance" for item in payload["decisions"]
+    )
+    assert all(item["actual_account_weight"] is None for item in payload["decisions"])
+    assert all("current_weight" not in item for item in payload["decisions"])
 
 
 def test_month_end_instruction_is_rebalance_to_target() -> None:
     qqq, ndx = synthetic_prices_with_non_month_end_crash()
     decision = monitor.build_decision(qqq, ndx, "2026-08-31")
     report = exact_monitor.render_exact_markdown(decision)
+    payload = exact_monitor.exact_payload(decision)
 
     assert decision.is_month_end is True
     assert decision.execution_date == "2026-09-01"
@@ -63,3 +72,9 @@ def test_month_end_instruction_is_rebalance_to_target() -> None:
     assert "上期月末目标" in report
     assert "按实际账户再平衡至" in report
     assert "当前模型权重" not in report
+    assert all(
+        item["instruction"] == "rebalance_actual_account_to_target"
+        for item in payload["decisions"]
+    )
+    assert all("prior_month_end_target" in item for item in payload["decisions"])
+    assert all("target_weight" in item for item in payload["decisions"])
