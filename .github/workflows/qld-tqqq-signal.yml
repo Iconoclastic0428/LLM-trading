@@ -1,6 +1,11 @@
 name: QLD TQQQ daily signal
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/qld-tqqq-signal.yml"
+      - "qld_tqqq_signal_monitor/**"
   schedule:
     - cron: "30 22 * * 1-5"
       timezone: "America/Los_Angeles"
@@ -26,10 +31,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -46,7 +51,11 @@ jobs:
         shell: bash
         run: |
           set +e
-          REPORT_DATE="${{ github.event.inputs.report_date }}"
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            REPORT_DATE="2026-08-28"
+          else
+            REPORT_DATE="${{ github.event.inputs.report_date }}"
+          fi
           if [[ -n "$REPORT_DATE" ]]; then
             python qld_tqqq_signal_monitor/monitor.py --report-date "$REPORT_DATE"
           else
