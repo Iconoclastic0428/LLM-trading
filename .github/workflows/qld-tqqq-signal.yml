@@ -2,9 +2,14 @@ name: QLD TQQQ monthly signal
 
 on:
   schedule:
-    # Calendar-aware monitoring runs after each U.S. weekday. Successful issue
-    # updates are published only when the resolved report is a month-end session.
+    # Primary run plus two fallbacks. GitHub scheduled workflows can be delayed or
+    # dropped under load, so redundant runs improve reliability. Successful issue
+    # updates are still published only when the resolved report is a month-end session.
     - cron: "30 22 * * 1-5"
+      timezone: "America/Los_Angeles"
+    - cron: "50 22 * * 1-5"
+      timezone: "America/Los_Angeles"
+    - cron: "10 23 * * 1-5"
       timezone: "America/Los_Angeles"
   workflow_dispatch:
     inputs:
