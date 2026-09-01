@@ -1,6 +1,11 @@
 name: QLD TQQQ monthly signal
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/qld-tqqq-signal.yml"
   schedule:
     # Primary run plus two fallbacks. GitHub scheduled workflows can be delayed or
     # dropped under load, so redundant runs improve reliability. Successful issue
