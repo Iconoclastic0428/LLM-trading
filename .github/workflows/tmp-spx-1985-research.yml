@@ -1,0 +1,71 @@
+name: Temporary SPX leveraged buy-and-hold research
+
+on:
+  push:
+    branches:
+      - audit/exact-monthly-signal
+    paths:
+      - ".github/workflows/tmp-spx-1985-research.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Query public L-ETF MCP backtest engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mcp-client
+          cd /tmp/mcp-client
+          npm init -y >/dev/null
+          npm install --silent @modelcontextprotocol/sdk
+          cat > research.mjs <<'NODE'
+          import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+          import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+          import { writeFile } from "node:fs/promises";
+
+          const client = new Client({ name: "spx-1985-research", version: "1.0.0" });
+          const transport = new StreamableHTTPClientTransport(new URL("https://l-etf.com/mcp"));
+          await client.connect(transport);
+
+          async function compare(label, startDate, endDate, presets) {
+            const result = await client.callTool({
+              name: "compare_backtests",
+              arguments: {
+                presets,
+                smaEnabled: false,
+                startDate,
+                endDate,
+              },
+            });
+            return { label, requestedStartDate: startDate, requestedEndDate: endDate, presets, result };
+          }
+
+          const output = {
+            generatedAt: new Date().toISOString(),
+            endpoint: "https://l-etf.com/mcp",
+            calls: [
+              await compare("full", "1985-01-31", "2026-08-28", ["UPRO", "SSO"]),
+              await compare("1985-1999", "1985-01-31", "1999-12-31", ["UPRO", "SSO"]),
+              await compare("2000-2009", "2000-01-03", "2009-12-31", ["UPRO", "SSO"]),
+              await compare("2010-2026", "2010-01-04", "2026-08-28", ["UPRO", "SSO"]),
+              await compare("UPRO-validation", "2009-06-23", "2026-08-28", ["UPRO", "UPRO-real"]),
+              await compare("SSO-validation", "2006-06-19", "2026-08-28", ["SSO", "SSO-real"]),
+            ],
+          };
+          await writeFile("/tmp/spx-backtest-result.json", JSON.stringify(output, null, 2));
+          console.log(JSON.stringify(output, null, 2));
+          await client.close();
+          NODE
+          node research.mjs
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: spx-1985-backtest-result
+          path: /tmp/spx-backtest-result.json
+          retention-days: 1
