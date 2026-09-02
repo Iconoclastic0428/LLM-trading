@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import csv, json, math
+          import bisect, csv, json
           from datetime import date
 
           START = "1985-01-31"
@@ -43,10 +43,19 @@ jobs:
           }
           PASSTHROUGH = 360 / 252 - 1
 
-          rates = {}
+          rate_rows = []
           with open('/tmp/rate-borrow.csv', newline='') as f:
               for r in csv.DictReader(f):
-                  rates[r['date']] = float(r['value'])
+                  rate_rows.append((r['date'], float(r['value'])))
+          rate_rows.sort()
+          rate_dates = [r[0] for r in rate_rows]
+          rate_values = [r[1] for r in rate_rows]
+
+          def rate_on_or_before(d):
+              i = bisect.bisect_right(rate_dates, d) - 1
+              if i < 0:
+                  raise RuntimeError(f'No borrowing rate on or before {d}')
+              return rate_values[i]
 
           rows = []
           with open('/tmp/index-sp.csv', newline='') as f:
@@ -57,7 +66,7 @@ jobs:
                           'date': d,
                           'total_return': float(r['adj_close']),
                           'price_only': float(r['close']),
-                          'borrow_annual': rates[d],
+                          'borrow_annual': rate_on_or_before(d),
                       })
 
           def simulate(field, cfg):
