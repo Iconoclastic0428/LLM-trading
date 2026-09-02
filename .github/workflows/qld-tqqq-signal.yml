@@ -2,15 +2,20 @@ name: QLD TQQQ monthly signal
 
 on:
   schedule:
-    # Primary run plus two fallbacks. GitHub scheduled workflows can be delayed or
-    # dropped under load, so redundant runs improve reliability. Successful issue
-    # updates are still published only when the resolved report is a month-end session.
-    - cron: "30 22 * * 1-5"
+    # GitHub scheduled runs may be delayed. These three after-close attempts are
+    # spread across the evening so at least one should finish before the next open.
+    - cron: "17 19 * * 1-5"
       timezone: "America/Los_Angeles"
-    - cron: "50 22 * * 1-5"
+    - cron: "37 21 * * 1-5"
       timezone: "America/Los_Angeles"
-    - cron: "10 23 * * 1-5"
+    - cron: "57 23 * * 1-5"
       timezone: "America/Los_Angeles"
+  push:
+    branches:
+      - main
+    paths:
+      - "qld_tqqq_signal_monitor/**"
+      - ".github/workflows/qld-tqqq-signal.yml"
   workflow_dispatch:
     inputs:
       report_date:
@@ -63,15 +68,25 @@ jobs:
           set -e
 
           PUBLISH="false"
-          if [[ "$STATUS" == "0" ]]; then
-            PUBLISH="$(python -c 'import json; payload=json.load(open("signal_output/signal.json", encoding="utf-8")); print("true" if payload.get("publish_notification", False) else "false")')"
+          REPORT_DATE_VALUE="unknown"
+          MARKET_STATUS="unknown"
+          IS_MONTH_END="unknown"
+          if [[ -f signal_output/signal.json ]]; then
+            REPORT_DATE_VALUE="$(python -c 'import json; p=json.load(open("signal_output/signal.json", encoding="utf-8")); print(p.get("report_date", "unknown"))')"
+            MARKET_STATUS="$(python -c 'import json; p=json.load(open("signal_output/signal.json", encoding="utf-8")); print(p.get("market_status", p.get("status", "unknown")))')"
+            IS_MONTH_END="$(python -c 'import json; p=json.load(open("signal_output/signal.json", encoding="utf-8")); print(str(p.get("is_month_end", False)).lower())')"
+            PUBLISH="$(python -c 'import json; p=json.load(open("signal_output/signal.json", encoding="utf-8")); print("true" if p.get("publish_notification", False) else "false")')"
           fi
 
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+          echo "report_date=$REPORT_DATE_VALUE" >> "$GITHUB_OUTPUT"
+          echo "market_status=$MARKET_STATUS" >> "$GITHUB_OUTPUT"
+          echo "is_month_end=$IS_MONTH_END" >> "$GITHUB_OUTPUT"
           cat signal_output/report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post month-end signal or validation failure
+        id: publish
         if: ${{ always() && (steps.generate.outputs.publish == 'true' || steps.generate.outputs.status != '0') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -85,6 +100,71 @@ jobs:
           else
             gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
               --body-file signal_output/report.md
+          fi
+
+      - name: Update automatic-run heartbeat
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: "1"
+          GENERATE_STATUS: ${{ steps.generate.outputs.status }}
+          PUBLISH_FLAG: ${{ steps.generate.outputs.publish }}
+          REPORT_DATE_VALUE: ${{ steps.generate.outputs.report_date }}
+          MARKET_STATUS: ${{ steps.generate.outputs.market_status }}
+          IS_MONTH_END: ${{ steps.generate.outputs.is_month_end }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          SCHEDULE_EXPRESSION: ${{ github.event.schedule }}
+        shell: bash
+        run: |
+          UTC_NOW="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          PT_NOW="$(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')"
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          SCHEDULE_VALUE="${SCHEDULE_EXPRESSION:-manual-or-push}"
+          GENERATE_VALUE="${GENERATE_STATUS:-not-run}"
+          PUBLISH_VALUE="${PUBLISH_FLAG:-false}"
+          REPORT_VALUE="${REPORT_DATE_VALUE:-unknown}"
+          MARKET_VALUE="${MARKET_STATUS:-unknown}"
+          MONTH_END_VALUE="${IS_MONTH_END:-unknown}"
+          PUBLISH_STEP_VALUE="${PUBLISH_OUTCOME:-skipped}"
+
+          if [[ "$GENERATE_VALUE" == "0" && "$PUBLISH_STEP_VALUE" != "failure" ]]; then
+            HEALTH="✅ 自动运行正常"
+          else
+            HEALTH="❌ 自动运行需要检查"
+          fi
+
+          cat > heartbeat.md <<EOF
+          <!-- qld-tqqq-automation-heartbeat -->
+          ## 自动运行状态
+
+          **${HEALTH}**
+
+          | 项目 | 最近一次运行 |
+          |---|---|
+          | 完成时间（Pacific） | ${PT_NOW} |
+          | 完成时间（UTC） | ${UTC_NOW} |
+          | 触发方式 | ${GITHUB_EVENT_NAME} |
+          | 计划表达式 | \`${SCHEDULE_VALUE}\` |
+          | 数据报告日 | ${REPORT_VALUE} |
+          | 市场状态 | ${MARKET_VALUE} |
+          | 是否月末交易日 | ${MONTH_END_VALUE} |
+          | 是否需要发布月末信号 | ${PUBLISH_VALUE} |
+          | 信号生成退出码 | ${GENERATE_VALUE} |
+          | 月末发布步骤 | ${PUBLISH_STEP_VALUE} |
+          | Actions 运行 | [查看本次运行](${RUN_URL}) |
+
+          非月末时，月末信号发布步骤显示为 \`skipped\` 是正常行为；这不表示自动任务没有运行。策略仍然只在月末调整仓位。
+          EOF
+
+          COMMENT_ID="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            --jq '.[] | select(.body | startswith("<!-- qld-tqqq-automation-heartbeat -->")) | .id' \
+            | head -n 1)"
+
+          if [[ -n "$COMMENT_ID" ]]; then
+            jq -Rs '{body: .}' heartbeat.md \
+              | gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" --input -
+          else
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file heartbeat.md
           fi
 
       - name: Fail workflow when signal generation failed
