@@ -84,12 +84,17 @@ def test_month_end_instruction_is_rebalance_to_target_and_publishable() -> None:
     assert all("target_weight" in item for item in payload["decisions"])
 
 
-def test_workflow_posts_success_only_when_payload_is_publishable() -> None:
+def test_workflow_is_redundant_observable_and_month_end_gated() -> None:
     workflow = (
         ROOT.parent / ".github" / "workflows" / "qld-tqqq-signal.yml"
     ).read_text(encoding="utf-8")
 
     assert workflow.startswith("name: QLD TQQQ monthly signal")
-    assert 'payload.get("publish_notification", False)' in workflow
+    assert 'p.get("publish_notification", False)' in workflow
     assert "steps.generate.outputs.publish == 'true'" in workflow
     assert "Post month-end signal or validation failure" in workflow
+    assert "Update automatic-run heartbeat" in workflow
+    assert "qld-tqqq-automation-heartbeat" in workflow
+    assert 'cron: "17 19 * * 1-5"' in workflow
+    assert 'cron: "37 21 * * 1-5"' in workflow
+    assert 'cron: "57 23 * * 1-5"' in workflow
