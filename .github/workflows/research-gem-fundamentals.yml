@@ -1,50 +1,42 @@
-name: Research GEM and fundamentals supplemental inputs
-
+name: Research selected public SUE inputs
 on:
   push:
     branches: [research/gem-fundamentals-20260904]
     paths: [.github/workflows/research-gem-fundamentals.yml]
-
 permissions:
   contents: read
-
 jobs:
   inputs:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
     steps:
-      - name: Retrieve selected SUE1 files and GEM published image
-        shell: bash
+      - name: Fetch documented public data
         run: |
           python -m pip install -q requests
-          mkdir -p /tmp/supplement
+          mkdir -p /tmp/selected-inputs
           python - <<'PY'
           import requests,zipfile,io,json,hashlib,re
           from pathlib import Path
-          root=Path('/tmp/supplement');manifest=[]
-          base='https://global-q.org/uploads/1/2/2/6/122679606/'
-          for name in ['me_mom_monthly_2025.zip','me_mom_daily_2025.zip']:
-            url=base+name
-            try:
-              r=requests.get(url,timeout=120);r.raise_for_status()
-              z=zipfile.ZipFile(io.BytesIO(r.content));(root/(name+'.names.json')).write_text(json.dumps(z.namelist(),indent=2))
-              selected=[]
-              for member in z.namelist():
-                if re.search(r'sue_1',member,re.I) and member.lower().endswith('.csv'):
-                  out=Path(member).name;data=z.read(member);(root/out).write_bytes(data);selected.append(out)
-              manifest.append({'url':url,'sha256':hashlib.sha256(r.content).hexdigest(),'selected':selected})
-            except Exception as e:manifest.append({'url':url,'error':str(e)})
-          url='https://www.optimalmomentum.com/wp-content/uploads/elementor/thumbs/Screenshot-2026-07-21-172943-rqraqs1oyuor1h65kijwfuf4nfxqmbamv3z3rrieea.png'
-          try:
-            r=requests.get(url,headers={'User-Agent':'Mozilla/5.0'},timeout=45);r.raise_for_status();(root/'gem_published_returns.png').write_bytes(r.content)
-            manifest.append({'url':url,'sha256':hashlib.sha256(r.content).hexdigest()})
-          except Exception as e:manifest.append({'url':url,'error':str(e)})
-          (root/'manifest.json').write_text(json.dumps(manifest,indent=2));print(json.dumps(manifest,indent=2))
+          root=Path('/tmp/selected-inputs');log=[]
+          headers={'User-Agent':'Mozilla/5.0 quantitative-research'}
+          for filename in ['me_mom_monthly_2025.zip','me_mom_daily_2025.zip']:
+            for host in ['global-q.org','www.global-q.org']:
+              url=f'https://{host}/uploads/1/2/2/6/122679606/{filename}'
+              try:
+                r=requests.get(url,headers=headers,timeout=90);r.raise_for_status()
+                z=zipfile.ZipFile(io.BytesIO(r.content));selected=[]
+                (root/(filename+'.names.json')).write_text(json.dumps(z.namelist(),indent=2))
+                for member in z.namelist():
+                  if 'sue_1' in member.lower() and member.lower().endswith('.csv'):
+                    out=Path(member).name;data=z.read(member);(root/out).write_bytes(data);selected.append(out)
+                log.append({'url':url,'sha256':hashlib.sha256(r.content).hexdigest(),'selected':selected});break
+              except Exception as e:log.append({'url':url,'error':str(e)})
+          (root/'manifest_retry.json').write_text(json.dumps(log,indent=2));print(json.dumps(log,indent=2))
           PY
-      - name: Preserve selected inputs
+      - name: Archive selected files
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: gem-fundamentals-supplement
-          path: /tmp/supplement
+          name: sue-selected-inputs
+          path: /tmp/selected-inputs
           retention-days: 7
