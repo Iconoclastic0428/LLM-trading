@@ -1,4 +1,4 @@
-name: Research GEM and fundamentals inputs
+name: Research GEM and fundamentals supplemental inputs
 
 on:
   push:
@@ -9,107 +9,42 @@ permissions:
   contents: read
 
 jobs:
-  download-public-inputs:
+  inputs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - name: Download public research inputs without changing production
+      - name: Retrieve selected SUE1 files and GEM published image
         shell: bash
         run: |
-          python -m pip install -q requests beautifulsoup4
-          mkdir -p /tmp/research-inputs
-          cat > /tmp/fetch_inputs.py <<'PY'
-          import concurrent.futures, datetime, hashlib, json, re, time
+          python -m pip install -q requests
+          mkdir -p /tmp/supplement
+          python - <<'PY'
+          import requests,zipfile,io,json,hashlib,re
           from pathlib import Path
-          from urllib.parse import urljoin, urlparse
-          import requests
-          from bs4 import BeautifulSoup
-
-          root=Path('/tmp/research-inputs')
-          root.mkdir(exist_ok=True)
-          manifest=[]
-          protocol={
-            'created_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            'purpose':'Public-input research only, no production change, no brokerage orders.',
-            'rules_frozen_before_performance_computation':{
-              'GEM':'12-month total return; first compare US equities with T-bills, then pick US or ex-US winner; otherwise aggregate bonds. Published original index returns are separate from independently calculated SPY/VEU/AGG ETF implementation.',
-              'FUNDAMENTAL':'Long-only 50/50 mix of French BIG high operating profitability and BIG high book-to-market portfolios. NYSE-median size split, top30pct characteristics, value weighted within sleeve, published annual June reconstitution. Outer sleeves rebalance monthly. Report sleeves too; do not select winner.',
-              'PEAD':'Long-only big-cap highest standardized unexpected earnings quintile, monthly reconstitution, from Hou/Xue/Zhang public size-by-SUE testing portfolios. No short leg and no current-survivor universe.',
-              'LIVE_FUNDAMENTAL':'50/50 QUAL and VLUE, monthly next-session-close rebalance, fixed ETF implementation proxy rather than exact French portfolio replication.'
-            },
-            'baseline':'Frozen supplied prior-research data, recompute BASE at 1x,2x,3x product caps, month-end signals and next-session-close proxy with drift.',
-            'data_cutoff':'2026-08-28 or latest common complete month; never fill unavailable returns.',
-            'costs':'ETF actual traded notional 10bp; published academic gross returns explicitly identified with fixed 0/100/200bp annual implementation-cost sensitivity.',
-            'anti_selection':'No horizon, universe, quantile or weight search. Report full covered history, pre2015 and 2015+ separately; no claim of untouched OOS.'
-          }
-          (root/'protocol.json').write_text(json.dumps(protocol,indent=2))
-
-          def download(name,url):
+          root=Path('/tmp/supplement');manifest=[]
+          base='https://global-q.org/uploads/1/2/2/6/122679606/'
+          for name in ['me_mom_monthly_2025.zip','me_mom_daily_2025.zip']:
+            url=base+name
             try:
-              r=requests.get(url,headers={'User-Agent':'Mozilla/5.0 quantitative-research'},timeout=45)
-              r.raise_for_status()
-              data=r.content
-              if name.endswith('.zip') and not data.startswith(b'PK'):
-                raise ValueError('Not a ZIP response')
-              if not data:raise ValueError('Empty response')
-              (root/name).write_bytes(data)
-              row={'name':name,'url':url,'status':'ok','bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
-            except Exception as exc:
-              row={'name':name,'url':url,'status':'error','error':str(exc)}
-            manifest.append(row);print(json.dumps(row),flush=True)
-            return row
-
-          french='https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/'
-          files=['6_Portfolios_ME_OP_2x3_CSV.zip','6_Portfolios_2x3_CSV.zip','F-F_Research_Data_Factors_CSV.zip','6_Portfolios_ME_OP_2x3_daily_CSV.zip','6_Portfolios_2x3_daily_CSV.zip']
-          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            list(pool.map(lambda name:download(name,french+name),files))
-
-          gem='https://www.optimalmomentum.com/global-equities-momentum/'
-          if download('gem_page.html',gem)['status']=='ok':
-            soup=BeautifulSoup((root/'gem_page.html').read_text(),'html.parser')
-            imgs=[]
-            for image in soup.find_all('img'):
-              for key in ['src','data-src']:
-                u=image.get(key,'')
-                if 'screenshot' in u.lower() and '2026' in u.lower():imgs.append(urljoin(gem,u))
-            for j,u in enumerate(dict.fromkeys(imgs)):
-              download('gem_returns_'+str(j)+'.png',u)
-
-          qurl='https://global-q.org/testingportfolios.html'
-          if download('q_page.html',qurl)['status']=='ok':
-            soup=BeautifulSoup((root/'q_page.html').read_text(),'html.parser')
-            links=[]
-            for a in soup.find_all('a',href=True):
-              u=urljoin(qurl,a['href']);text=a.get_text(' ',strip=True)
-              if ('sue' in u.lower()) or ('technical' in text.lower()) or ('release' in text.lower()):links.append({'text':text,'url':u})
-            (root/'q_links.json').write_text(json.dumps(links,indent=2))
-            for item in links:
-              u=item['url'];base=Path(urlparse(u).path).name
-              if re.search(r'sue',base,re.I) and ('monthly' in base.lower() or 'daily' in base.lower()):download(base,u)
-              elif 'technical' in item['text'].lower() and base.lower().endswith('.pdf'):download('q_technical.pdf',u)
-
-          p1=int(datetime.datetime(1984,1,1,tzinfo=datetime.timezone.utc).timestamp())
-          p2=int(datetime.datetime(2026,8,29,tzinfo=datetime.timezone.utc).timestamp())
-          for symbol in ['SPY','VEU','AGG','QUAL','VLUE','QQQ','QLD','TQQQ']:
-            for host in ['query1','query2']:
-              url=f'https://{host}.finance.yahoo.com/v8/finance/chart/{symbol}?period1={p1}&period2={p2}&interval=1d&events=div%2Csplits&includeAdjustedClose=true'
-              row=download('yahoo_'+symbol+'.json',url)
-              if row['status']=='ok':
-                try:
-                  obj=json.loads((root/row['name']).read_text());assert obj['chart']['result'][0]['timestamp']
-                  break
-                except Exception as exc:
-                  row['status']='invalid';row['error']=str(exc)
-            time.sleep(.5)
-          (root/'manifest.json').write_text(json.dumps(manifest,indent=2))
+              r=requests.get(url,timeout=120);r.raise_for_status()
+              z=zipfile.ZipFile(io.BytesIO(r.content));(root/(name+'.names.json')).write_text(json.dumps(z.namelist(),indent=2))
+              selected=[]
+              for member in z.namelist():
+                if re.search(r'sue_1',member,re.I) and member.lower().endswith('.csv'):
+                  out=Path(member).name;data=z.read(member);(root/out).write_bytes(data);selected.append(out)
+              manifest.append({'url':url,'sha256':hashlib.sha256(r.content).hexdigest(),'selected':selected})
+            except Exception as e:manifest.append({'url':url,'error':str(e)})
+          url='https://www.optimalmomentum.com/wp-content/uploads/elementor/thumbs/Screenshot-2026-07-21-172943-rqraqs1oyuor1h65kijwfuf4nfxqmbamv3z3rrieea.png'
+          try:
+            r=requests.get(url,headers={'User-Agent':'Mozilla/5.0'},timeout=45);r.raise_for_status();(root/'gem_published_returns.png').write_bytes(r.content)
+            manifest.append({'url':url,'sha256':hashlib.sha256(r.content).hexdigest()})
+          except Exception as e:manifest.append({'url':url,'error':str(e)})
+          (root/'manifest.json').write_text(json.dumps(manifest,indent=2));print(json.dumps(manifest,indent=2))
           PY
-          python /tmp/fetch_inputs.py
-          cp /tmp/fetch_inputs.py /tmp/research-inputs/
-
-      - name: Upload public research inputs
+      - name: Preserve selected inputs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: gem-fundamentals-inputs
-          path: /tmp/research-inputs
+          name: gem-fundamentals-supplement
+          path: /tmp/supplement
           retention-days: 7
