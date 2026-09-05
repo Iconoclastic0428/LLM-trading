@@ -176,24 +176,9 @@ def write_exact_outputs(decision: monitor.DailyDecision, output_dir: Path) -> No
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = monitor.parse_args(argv)
-    report_date = (
-        args.report_date
-        or monitor.latest_completed_report_date().strftime("%Y-%m-%d")
-    )
-    output_dir = Path(args.output_dir)
-    try:
-        session = monitor._http_session()
-        qqq = monitor.fetch_qqq_close(session)
-        ndx = monitor.fetch_ndx_close(session)
-        decision = monitor.build_decision(qqq, ndx, report_date)
-        write_exact_outputs(decision, output_dir)
-        print(render_exact_markdown(decision))
-        return 0
-    except Exception as exc:
-        monitor.write_error(report_date, exc, output_dir)
-        print(f"Signal generation failed: {exc}", file=sys.stderr)
-        return 2
+    # Lazy import avoids a cycle: automation reuses the frozen payload/renderer.
+    from automation import main as reliable_main
+    return reliable_main(argv)
 
 
 if __name__ == "__main__":
