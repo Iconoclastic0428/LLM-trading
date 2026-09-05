@@ -1,0 +1,71 @@
+name: Isolated fixed-rule rotation research inputs
+on:
+  push:
+    branches: [research/rotation-fixed-20260904]
+    paths: [.github/workflows/research-rotation-inputs.yml]
+permissions:
+  contents: read
+jobs:
+  inputs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Freeze protocol and download only public data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rotation-inputs
+          python - <<'PY'
+          import concurrent.futures, datetime, hashlib, json, pathlib, time, urllib.request
+          out=pathlib.Path('/tmp/rotation-inputs')
+          protocol={
+            'created_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'scope':'Research only; no production change, notification or brokerage transaction.',
+            'cutoff':'2026-08-28, or last available date; no future filling.',
+            'primary_rules':{
+              'IND_RS6':'French 12 industry value-weighted total-return sleeves; month-end trailing 6-month return; select top 4, equal weight. Long-only, no market gate.',
+              'IND_DUAL6':'Same top 4; each selected sleeve must beat trailing 6-month Treasury return, otherwise its quarter stays in bills. Do not redistribute failed slots.',
+              'ETF_SECTOR_PROXIES':'Original nine Select Sector ETFs XLB XLE XLF XLI XLK XLP XLU XLV XLY; top 3 by six-month return. Test both relative-only and bills-hurdle forms. Separate proxy, not a splice onto French.',
+              'CROSS_ASSET12':'SPY VEU VNQ IEF GLD DBC. Rank trailing 12-month total return; select top 3 at one-third each; slots not beating same-period bills stay in bills. No extra timing filters.',
+              'STYLE_ROT12':'Three previously specified academic long-only large-cap sleeves: high operating profitability, high book-to-market, high SUE1. Rank trailing 12-month total return; hold top 2 equally; failed bills-hurdle slots stay in bills. Not a replication of long-short factor-momentum paper.'
+            },
+            'execution':'Month-end signal; next available trading-session close; units held unchanged until next rebalance, excluding automatic total-return reinvestment. Not next-open live execution.',
+            'cost':'10bp per actual traded dollar, both sides of switches; stress 0 and 50bp. Academic internal turnover not captured; also fixed annual 1% and 2% drag diagnostics.',
+            'controls':'Equal-weight no-ranking portfolio in each universe; prior BASE1X/QLD/TQQQ; common-date comparisons; no ex-post leverage matching.',
+            'inference':'Full history, pre/post2000, 2010-2014, 2015+; rolling 5/10 years; paired 24-month circular block bootstrap 5000 draws seed20260904, Holm adjustment across primary comparisons.',
+            'sensitivity':'One change at a time only: six-month horizon 3/6/12; twelve-month horizon 6/12/18; top-k +/-1 where valid. Report all; never replace primary rule with best neighbor.',
+            'anti_overfit':'No optimized weights, best-date search, stop-loss tuning, hindsight industry membership, future ranking or parameter winner. Entire history already seen in this research program; no claim of clean OOS.'
+          }
+          (out/'protocol.json').write_text(json.dumps(protocol,indent=2))
+          manifest=[]
+          def get(name, urls):
+            errors=[]
+            for url in urls:
+              try:
+                req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0 research-data-check'})
+                with urllib.request.urlopen(req,timeout=40) as r: data=r.read()
+                if name.endswith('.zip') and not data.startswith(b'PK'):raise ValueError('Not a ZIP')
+                if name.startswith('yahoo_'):
+                  obj=json.loads(data);assert obj['chart']['result'][0]['timestamp']
+                (out/name).write_bytes(data)
+                row={'file':name,'url':url,'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest(),'status':'ok'}
+                manifest.append(row);print(json.dumps(row),flush=True);return
+              except Exception as e:errors.append(str(e))
+            row={'file':name,'status':'failed','errors':errors};manifest.append(row);print(json.dumps(row),flush=True)
+          base='https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/'
+          for n in ['12_Industry_Portfolios_daily_CSV.zip','12_Industry_Portfolios_CSV.zip','F-F_Research_Data_Factors_daily_CSV.zip']:
+            get(n,[base+n])
+          p1=int(datetime.datetime(1984,1,1,tzinfo=datetime.timezone.utc).timestamp())
+          p2=int(datetime.datetime(2026,8,29,tzinfo=datetime.timezone.utc).timestamp())
+          symbols=['XLB','XLE','XLF','XLI','XLK','XLP','XLU','XLV','XLY','IEF','GLD','VNQ','DBC']
+          def sym_get(s):
+            get('yahoo_'+s+'.json',[f'https://{host}.finance.yahoo.com/v8/finance/chart/{s}?period1={p1}&period2={p2}&interval=1d&events=div%2Csplits&includeAdjustedClose=true' for host in ['query1','query2']])
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:list(pool.map(sym_get,symbols))
+          (out/'manifest.json').write_text(json.dumps(manifest,indent=2))
+          PY
+      - name: Upload public research inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fixed-rotation-inputs
+          path: /tmp/rotation-inputs/
+          retention-days: 7
