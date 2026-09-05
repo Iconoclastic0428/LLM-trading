@@ -1,0 +1,45 @@
+name: Isolated advanced monthly research inputs
+on:
+  push:
+    branches: [research/advanced-monthly-20260904]
+    paths: [.github/workflows/research-advanced-inputs.yml]
+permissions:
+  contents: read
+jobs:
+  inputs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Retrieve selected public daily history
+        shell: bash
+        run: |
+          mkdir -p /tmp/advanced-inputs
+          python - <<'PY'
+          import urllib.request, urllib.parse, json, hashlib, pathlib, time
+          from datetime import datetime, timezone
+          root=pathlib.Path('/tmp/advanced-inputs')
+          manifest=[]
+          for sym in ['IWM','VEA','VWO','TLT','TIP','BIL']:
+              params=urllib.parse.urlencode({'period1':631152000,'period2':1788307200,'interval':'1d','events':'div,splits','includeAdjustedClose':'true'})
+              errors=[]
+              for host in ['query1.finance.yahoo.com','query2.finance.yahoo.com']:
+                  url=f'https://{host}/v8/finance/chart/{sym}?{params}'
+                  try:
+                      req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'})
+                      with urllib.request.urlopen(req,timeout=40) as r: payload=r.read()
+                      obj=json.loads(payload)
+                      assert obj['chart']['result'][0]['timestamp']
+                      path=root/f'yahoo_{sym}.json'; path.write_bytes(payload)
+                      manifest.append({'symbol':sym,'url':url,'sha256':hashlib.sha256(payload).hexdigest(),'bytes':len(payload)})
+                      break
+                  except Exception as e: errors.append(str(e))
+              else: raise RuntimeError(f'{sym}: {errors}')
+          (root/'manifest.json').write_text(json.dumps({'utc':datetime.now(timezone.utc).isoformat(),'cutoff_used_by_research':'2026-08-28','files':manifest},indent=2))
+          print(json.dumps(manifest,indent=2))
+          PY
+      - name: Upload public inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: advanced-monthly-inputs
+          path: /tmp/advanced-inputs
+          retention-days: 7
