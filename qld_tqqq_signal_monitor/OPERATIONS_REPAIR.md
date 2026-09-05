@@ -10,7 +10,7 @@
 
 ## 修复范围
 
-新增 reliable_data.py（日期感知刷新与验证）、automation.py（真实交易日、审计与执行截止）及publish_status.py（幂等发布、恢复状态与截止报警）。exact_monitor.py入口转发到新运行层；monitor.py中的策略计算保持逐字不变。
+新增 reliable_data.py（日期感知刷新与验证）、automation.py（真实交易日、审计与执行截止）及publish_status.py（幂等发布、恢复状态与截止报警）。exact_monitor.py入口转发到新运行层；monitor.py中的策略计算保持逐字不变，git blob为`6288f18f8a65badc9d8a9738ff030452d5760e86`。
 
 仅使用Yahoo QQQ的quote.close与FRED NASDAQ100。完整历史和近期日线重叠至少5日，最大相对差异不超过1bp；最近260个交易日不得缺失；仍要求QQQ/NDX最近收益相关性至少0.95。未降低保护门槛以制造绿色状态。
 
@@ -18,6 +18,17 @@ cron显式使用UTC每小时:07；仅PT晚间18:00至次日06:59取数。保留�
 
 数据重试最多3轮，指数和基金必须有同一目标交易日数据。issue错误记录在后续验证成功时标为已恢复并保留原文。只识别github-actions[bot]的去重标记，任何读取失败都不能视为不存在旧通知。历史日期手动回放永不发布正式目标。
 
-## 验证
+## FRED请求路径故障与同机对照
 
-测试覆盖HTTP 200旧数据、近期刷新、备用端点、重叠冲突、交易日缺口、重试耗尽、未来盘中价格、假期、早收盘、DST、周末月末补发、到期拒发、历史回放隔离、bot标记去重和故障恢复。真实网络校验与自然cron观察单独报告，不能用push测试冒充定时触发。
+隔离验证中的requests及Actions安装Python的urllib都在FRED请求上超时。Run 33949798478在同一runner、同一URL、同一时点对照，系统`/usr/bin/python3`取得207894字节CSV（2.67秒）；Actions安装的Python读取超时；curl默认HTTP/2报stream INTERNAL_ERROR。不能仅从这些现象断言TLS故障的最终原因。
+
+修复将FRED字节下载隔离在纯标准库`fred_transport.py`，由runner系统Python调用。它只允许原FRED NASDAQ100 CSV地址和日期范围参数，不计算或推算价格。策略计算继续使用锁定依赖的Python环境。下载有超时、大小和状态码限制；原数据日期、重叠、完整性和相关性校验全部保留。未部署Yahoo NDX代理。
+
+## 已完成验证
+
+- Run 33949926923：41项测试通过；策略文件hash不变；真实QQQ和FRED数据均至2026-09-04；QQQ 718.9600219726562，NDX 29544.16；首次数据尝试成功。
+- 同一run真实回放2026-08-31，确认`mode=replay`、`publish_notification=false`且所有指令为historical_only。
+- 测试覆盖HTTP 200旧数据、近期刷新、备用端点、重叠冲突、交易日缺口、重试耗尽、未来盘中价格、假期、早收盘、DST、周末月末补发、到期拒发、bot标记去重、故障恢复、FRED下载失败和原始地址约束。
+- 此run为隔离分支push验证，不是自然cron验证，也没有issue写权限。生产合并后的发布验证必须另查实际run及issue评论。
+
+临时验证与诊断工作流已移除，不进入main。

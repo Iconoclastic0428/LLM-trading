@@ -92,6 +92,7 @@ def generate(output_dir: Path, report_date=None, now=None, loader=load_prices) -
         payload = exact_monitor.exact_payload(decision)
         payload.update({'publish_notification': timing['publish_notification'],
                         'mode': status['mode'], 'sources': status['sources'],
+                        'calendar_poll_frequency': 'hourly_overnight',
                         'verified_at': status['completed_at']})
         if not timing['publish_notification']:
             for item in payload['decisions']:
@@ -113,6 +114,7 @@ def generate(output_dir: Path, report_date=None, now=None, loader=load_prices) -
         atomic_json(output_dir / 'signal.json', payload)
         candidate_payload = exact_monitor.exact_payload(candidate)
         candidate_payload['publish_notification'] = timing['publish_notification']
+        candidate_payload['calendar_poll_frequency'] = 'hourly_overnight'
         if not timing['publish_notification']:
             for item in candidate_payload['decisions']:
                 item['instruction'] = 'historical_only'

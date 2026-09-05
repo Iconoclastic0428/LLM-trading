@@ -102,7 +102,7 @@ def repair_errors(client, status, comments, run_url):
                         f'已在 {status["completed_at"]} 验证 QQQ 和 NDX 收盘数据至 {report}。'
                         '\n原失败未产生交易指令；不补做已过期交易。\n\n'
                         f'[恢复核验运行]({run_url})\n\n<details><summary>保留原始诊断</summary>\n\n'
-                        + body.replace('-->', '--&gt;') + '\n</details>\n')
+                        + body.replace('<!--', '&lt;!--').replace('-->', '--&gt;') + '\n</details>\n')
             client.api(f'repos/{client.repo}/issues/comments/{c["id"]}', 'PATCH', {'body': resolved})
 
 
