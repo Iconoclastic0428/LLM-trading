@@ -2,26 +2,19 @@ name: QLD TQQQ monthly signal
 
 on:
   schedule:
-    # GitHub scheduled runs may be delayed. These three after-close attempts are
-    # spread across the evening so at least one should finish before the next open.
-    - cron: "17 19 * * 1-5"
-      timezone: "America/Los_Angeles"
-    - cron: "37 21 * * 1-5"
-      timezone: "America/Los_Angeles"
-    - cron: "57 23 * * 1-5"
-      timezone: "America/Los_Angeles"
+    # Explicit UTC. Hourly eligibility checks tolerate missed/delayed cron events.
+    - cron: "7 * * * *"
   push:
-    branches:
-      - main
-    paths:
-      - "qld_tqqq_signal_monitor/**"
-      - ".github/workflows/qld-tqqq-signal.yml"
+    branches: [main]
+    paths: ["qld_tqqq_signal_monitor/**", ".github/workflows/qld-tqqq-signal.yml"]
   workflow_dispatch:
     inputs:
       report_date:
-        description: "Optional report date in YYYY-MM-DD"
+        description: "Optional YYYY-MM-DD: historical audit ONLY, never publishes a trade"
         required: false
         type: string
+  repository_dispatch:
+    types: [qld-tqqq-check]
 
 permissions:
   contents: read
@@ -34,139 +27,77 @@ concurrency:
 jobs:
   signal:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+    timeout-minutes: 18
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Select overnight check window
+        id: window
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python - <<'PY'
+          from datetime import datetime
+          import os
+          from zoneinfo import ZoneInfo
+          pt = datetime.now(ZoneInfo('America/Los_Angeles'))
+          # UTC cron is hourly; only PT 18:00-06:59 performs market-data work.
+          # Include weekends/holidays for month-end catch-up; no intraday orders.
+          eligible = os.environ['EVENT_NAME'] != 'schedule' or pt.hour >= 18 or pt.hour <= 6
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'run={str(eligible).lower()}\n')
+          print(f'Actual runner time: {pt.isoformat()}; eligible={eligible}')
+          PY
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.window.outputs.run == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: qld_tqqq_signal_monitor/requirements.txt
-
       - name: Install dependencies
+        if: steps.window.outputs.run == 'true'
         run: python -m pip install -r qld_tqqq_signal_monitor/requirements.txt
-
       - name: Run tests
-        run: python -m pytest qld_tqqq_signal_monitor/tests
-
-      - name: Generate exact monthly-strategy signal
+        if: steps.window.outputs.run == 'true'
+        run: python -m pytest qld_tqqq_signal_monitor/tests -q
+      - name: Generate verified monthly signal
+        if: steps.window.outputs.run == 'true'
         id: generate
+        timeout-minutes: 10
+        env:
+          REPORT_DATE: ${{ inputs.report_date }}
         shell: bash
         run: |
-          set +e
-          REPORT_DATE="${{ github.event.inputs.report_date }}"
-          if [[ -n "$REPORT_DATE" ]]; then
-            python qld_tqqq_signal_monitor/exact_monitor.py --report-date "$REPORT_DATE"
-          else
-            python qld_tqqq_signal_monitor/exact_monitor.py
-          fi
-          STATUS=$?
-          set -e
-
-          PUBLISH="false"
-          REPORT_DATE_VALUE="unknown"
-          MARKET_STATUS="unknown"
-          IS_MONTH_END="unknown"
-          if [[ -f signal_output/signal.json ]]; then
-            REPORT_DATE_VALUE="$(python -c 'import json; p=json.load(open("signal_output/signal.json", encoding="utf-8")); print(p.get("report_date", "unknown"))')"
-            MARKET_STATUS="$(python -c 'import json; p=json.load(open("signal_output/signal.json", encoding="utf-8")); print(p.get("market_status", p.get("status", "unknown")))')"
-            IS_MONTH_END="$(python -c 'import json; p=json.load(open("signal_output/signal.json", encoding="utf-8")); print(str(p.get("is_month_end", False)).lower())')"
-            PUBLISH="$(python -c 'import json; p=json.load(open("signal_output/signal.json", encoding="utf-8")); print("true" if p.get("publish_notification", False) else "false")')"
-          fi
-
-          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
-          echo "report_date=$REPORT_DATE_VALUE" >> "$GITHUB_OUTPUT"
-          echo "market_status=$MARKET_STATUS" >> "$GITHUB_OUTPUT"
-          echo "is_month_end=$IS_MONTH_END" >> "$GITHUB_OUTPUT"
-          cat signal_output/report.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Post month-end signal or validation failure
-        id: publish
-        if: ${{ always() && (steps.generate.outputs.publish == 'true' || steps.generate.outputs.status != '0') }}
+          args=()
+          if [[ -n "$REPORT_DATE" ]]; then args+=(--report-date "$REPORT_DATE"); fi
+          python qld_tqqq_signal_monitor/exact_monitor.py "${args[@]}"
+      - name: Publish signal and recovery status
+        # Publisher handles missing output after setup/test failures and never
+        # calls a failed/expired run healthy. No grep -q / pipefail dedup races.
+        if: always() && steps.window.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: "1"
-        shell: bash
-        run: |
-          MARKER="$(grep -m1 '^<!-- qld-tqqq-signal:' signal_output/report.md)"
-          if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
-            --jq '.[].body' | grep -Fq "$MARKER"; then
-            echo "A comment with marker $MARKER already exists."
-          else
-            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-              --body-file signal_output/report.md
-          fi
-
-      - name: Update automatic-run heartbeat
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: "1"
-          GENERATE_STATUS: ${{ steps.generate.outputs.status }}
-          PUBLISH_FLAG: ${{ steps.generate.outputs.publish }}
-          REPORT_DATE_VALUE: ${{ steps.generate.outputs.report_date }}
-          MARKET_STATUS: ${{ steps.generate.outputs.market_status }}
-          IS_MONTH_END: ${{ steps.generate.outputs.is_month_end }}
-          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
           SCHEDULE_EXPRESSION: ${{ github.event.schedule }}
-        shell: bash
+          REPORT_DATE: ${{ inputs.report_date }}
         run: |
-          UTC_NOW="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          PT_NOW="$(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')"
-          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          SCHEDULE_VALUE="${SCHEDULE_EXPRESSION:-manual-or-push}"
-          GENERATE_VALUE="${GENERATE_STATUS:-not-run}"
-          PUBLISH_VALUE="${PUBLISH_FLAG:-false}"
-          REPORT_VALUE="${REPORT_DATE_VALUE:-unknown}"
-          MARKET_VALUE="${MARKET_STATUS:-unknown}"
-          MONTH_END_VALUE="${IS_MONTH_END:-unknown}"
-          PUBLISH_STEP_VALUE="${PUBLISH_OUTCOME:-skipped}"
-
-          if [[ "$GENERATE_VALUE" == "0" && "$PUBLISH_STEP_VALUE" != "failure" ]]; then
-            HEALTH="✅ 自动运行正常"
+          if [ -n "$REPORT_DATE" ]; then
+            echo "Historical audit does not mutate production issue or heartbeat"
           else
-            HEALTH="❌ 自动运行需要检查"
+            python qld_tqqq_signal_monitor/publish_status.py
           fi
-
-          cat > heartbeat.md <<EOF
-          <!-- qld-tqqq-automation-heartbeat -->
-          ## 自动运行状态
-
-          **${HEALTH}**
-
-          | 项目 | 最近一次运行 |
-          |---|---|
-          | 完成时间（Pacific） | ${PT_NOW} |
-          | 完成时间（UTC） | ${UTC_NOW} |
-          | 触发方式 | ${GITHUB_EVENT_NAME} |
-          | 计划表达式 | \`${SCHEDULE_VALUE}\` |
-          | 数据报告日 | ${REPORT_VALUE} |
-          | 市场状态 | ${MARKET_VALUE} |
-          | 是否月末交易日 | ${MONTH_END_VALUE} |
-          | 是否需要发布月末信号 | ${PUBLISH_VALUE} |
-          | 信号生成退出码 | ${GENERATE_VALUE} |
-          | 月末发布步骤 | ${PUBLISH_STEP_VALUE} |
-          | Actions 运行 | [查看本次运行](${RUN_URL}) |
-
-          非月末时，月末信号发布步骤显示为 \`skipped\` 是正常行为；这不表示自动任务没有运行。策略仍然只在月末调整仓位。
-          EOF
-
-          COMMENT_ID="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
-            --jq '.[] | select(.body | startswith("<!-- qld-tqqq-automation-heartbeat -->")) | .id' \
-            | head -n 1)"
-
-          if [[ -n "$COMMENT_ID" ]]; then
-            jq -Rs '{body: .}' heartbeat.md \
-              | gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" --input -
-          else
-            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file heartbeat.md
-          fi
-
-      - name: Fail workflow when signal generation failed
-        if: steps.generate.outputs.status != '0'
-        run: exit 1
+      - name: Preserve audit outputs
+        if: always() && steps.window.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qld-tqqq-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: signal_output/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Add run summary
+        if: always() && steps.window.outputs.run == 'true'
+        run: |
+          if [ -f signal_output/report.md ]; then cat signal_output/report.md >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f signal_output/publication.json ]; then cat signal_output/publication.json >> "$GITHUB_STEP_SUMMARY"; fi

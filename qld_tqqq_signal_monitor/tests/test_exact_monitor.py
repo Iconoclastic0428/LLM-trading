@@ -90,11 +90,11 @@ def test_workflow_is_redundant_observable_and_month_end_gated() -> None:
     ).read_text(encoding="utf-8")
 
     assert workflow.startswith("name: QLD TQQQ monthly signal")
-    assert 'p.get("publish_notification", False)' in workflow
-    assert "steps.generate.outputs.publish == 'true'" in workflow
-    assert "Post month-end signal or validation failure" in workflow
-    assert "Update automatic-run heartbeat" in workflow
-    assert "qld-tqqq-automation-heartbeat" in workflow
-    assert 'cron: "17 19 * * 1-5"' in workflow
-    assert 'cron: "37 21 * * 1-5"' in workflow
-    assert 'cron: "57 23 * * 1-5"' in workflow
+    assert 'cron: "7 * * * *"' in workflow
+    assert "Publish signal and recovery status" in workflow
+    assert "qld_tqqq_signal_monitor/exact_monitor.py" in workflow
+    assert "qld_tqqq_signal_monitor/publish_status.py" in workflow
+    assert "Preserve audit outputs" in workflow
+    assert "cancel-in-progress: false" in workflow
+    assert "REPORT_DATE:" in workflow
+    assert 'REPORT_DATE="${{' not in workflow
