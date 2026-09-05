@@ -1,4 +1,5 @@
 name: Isolated monitor repair validation
+# Validate canonical FRED retrieval before date-bounded fallback.
 on:
   push:
     branches: [fix/monthly-data-recovery-20260904]

@@ -121,29 +121,38 @@ def get_qqq(session, report: pd.Timestamp, audit: list[dict]) -> pd.Series:
 
 def get_ndx(session, report: pd.Timestamp, audit: list[dict]) -> pd.Series:
     url = monitor.FRED_NDX_URL
-    params = {'cosd': '1985-01-01', 'coed': report.strftime('%Y-%m-%d')}
-    try:
-        r = session.get(url, params=params, timeout=(8, 25))
-        r.raise_for_status()
-        history = fred_series(r.text).loc[:report]
-        audit.append({'source': url, 'request': 'full',
-                      'latest': str(history.index.max().date())})
+    # The canonical series CSV can be cached when date-bounded export requests
+    # are slow. Validate its content date, never equate HTTP 200 with freshness.
+    requests_to_try = [
+        ('canonical', None),
+        ('bounded', {'cosd': '1985-01-01', 'coed': report.strftime('%Y-%m-%d')}),
+    ]
+    errors = []
+    for request_name, params in requests_to_try:
         try:
-            result = validate_asof(history, report, 'NDX')
-        except DataUnavailable:
-            params['cosd'] = (report - pd.Timedelta(days=90)).strftime('%Y-%m-%d')
             r = session.get(url, params=params, timeout=(8, 25))
             r.raise_for_status()
-            tail = fred_series(r.text).loc[:report]
-            audit.append({'source': url, 'request': 'recent',
-                          'latest': str(tail.index.max().date())})
-            result = validate_asof(merge_tail(history, tail, 'NDX'), report, 'NDX')
-        result.attrs['source'] = url
-        return result
-    except (requests.RequestException, ValueError, KeyError, TypeError, IndexError,
-            DataUnavailable) as exc:
-        audit.append({'source': url, 'error': str(exc)})
-        raise DataUnavailable(f'FRED NDX: {exc}') from exc
+            history = fred_series(r.text).loc[:report]
+            audit.append({'source': url, 'request': request_name,
+                          'latest': str(history.index.max().date())})
+            try:
+                result = validate_asof(history, report, 'NDX')
+            except DataUnavailable:
+                recent = {'cosd': (report - pd.Timedelta(days=90)).strftime('%Y-%m-%d'),
+                          'coed': report.strftime('%Y-%m-%d')}
+                r = session.get(url, params=recent, timeout=(8, 25))
+                r.raise_for_status()
+                tail = fred_series(r.text).loc[:report]
+                audit.append({'source': url, 'request': 'recent',
+                              'latest': str(tail.index.max().date())})
+                result = validate_asof(merge_tail(history, tail, 'NDX'), report, 'NDX')
+            result.attrs['source'] = url
+            return result
+        except (requests.RequestException, ValueError, KeyError, TypeError, IndexError,
+                DataUnavailable) as exc:
+            audit.append({'source': url, 'request': request_name, 'error': str(exc)})
+            errors.append(str(exc))
+    raise DataUnavailable('FRED NDX: all requests failed: ' + '; '.join(errors))
 
 
 def load_prices(report: pd.Timestamp, audit: list[dict], attempts: int = 3,

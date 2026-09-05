@@ -117,7 +117,7 @@ def test_fred_stale_failure_not_forward_filled(prices):
     _, n = prices
     csv = n.iloc[:-1].rename('NASDAQ100').to_csv(index_label='observation_date')
     with pytest.raises(data.DataUnavailable):
-        data.get_ndx(Session([csv, csv]), n.index[-1], [])
+        data.get_ndx(Session([csv, csv, csv, csv]), n.index[-1], [])
 
 
 def test_semantic_retry_succeeds_after_stale_attempt(monkeypatch, prices):
@@ -289,3 +289,12 @@ def test_month_end_publishes_once_and_rechecks_cutoff(tmp_path, monkeypatch):
     monkeypatch.setattr(pub,'now_utc',lambda:pub.parse_time('2026-09-01T13:20:00Z'))
     assert pub.publish(tmp_path,c,env,now)==2
     assert pub.signal_marker('2026-08-31') not in c.markers
+
+
+def test_fred_canonical_export_is_tried_before_uncached_date_range(prices):
+    _,n=prices
+    csv=n.rename('NASDAQ100').to_csv(index_label='observation_date')
+    session=Session([csv])
+    out=data.get_ndx(session,n.index[-1],[])
+    assert out.index[-1]==n.index[-1]
+    assert len(session.urls)==1 and session.urls[0][1]['params'] is None
