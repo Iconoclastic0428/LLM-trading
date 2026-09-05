@@ -1,0 +1,27 @@
+name: Isolated monitor repair validation
+on:
+  push:
+    branches: [fix/monthly-data-recovery-20260904]
+    paths: [.github/workflows/monitor-repair-validation.yml]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r qld_tqqq_signal_monitor/requirements.txt
+      - run: python -m pytest qld_tqqq_signal_monitor/tests -q
+      - name: Archive the scoped source and tests
+        run: tar -czf monitor-source.tgz qld_tqqq_signal_monitor .github/workflows/qld-tqqq-signal.yml .github/workflows/qld-tqqq-tests.yml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: monitor-repair-source
+          path: monitor-source.tgz
+          retention-days: 7
