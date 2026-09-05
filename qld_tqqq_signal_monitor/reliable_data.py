@@ -4,6 +4,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from io import StringIO
 import time
+from urllib.error import URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import numpy as np
 import pandas as pd
@@ -18,8 +21,35 @@ class DataUnavailable(monitor.MonitorError):
     pass
 
 
+class ProviderSession(requests.Session):
+    """Use the tested standard HTTP transport for the original FRED CSV URL."""
+
+    def get(self, url, **kwargs):
+        if url != monitor.FRED_NDX_URL:
+            return super().get(url, **kwargs)
+        params = kwargs.get('params')
+        target = url + ('&' + urlencode(params) if params else '')
+        # urllib does not automatically decode requests' Accept-Encoding list.
+        # Request plain CSV and retain the same freshness checks after parsing.
+        headers = {k: self.headers[k] for k in ('User-Agent', 'Cache-Control', 'Pragma')
+                   if k in self.headers}
+        timeout = kwargs.get('timeout', 25)
+        if isinstance(timeout, tuple):
+            timeout = max(timeout)
+        try:
+            with urlopen(Request(target, headers=headers), timeout=timeout) as raw:
+                response = requests.Response()
+                response.status_code = raw.status
+                response.url = target
+                response._content = raw.read()
+                response.encoding = 'utf-8'
+                return response
+        except (URLError, OSError, TimeoutError) as exc:
+            raise requests.RequestException(f'FRED CSV transport: {exc}') from exc
+
+
 def http_session() -> requests.Session:
-    s = requests.Session()
+    s = ProviderSession()
     s.headers.update({'User-Agent': 'Mozilla/5.0 monthly-signal-monitor/2.0',
                       'Cache-Control': 'no-cache', 'Pragma': 'no-cache'})
     s.mount('https://', HTTPAdapter(max_retries=Retry(

@@ -1,4 +1,5 @@
-name: Isolated monitor provider diagnosis
+name: Isolated monitor repair validation
+# End-to-end check using the verified FRED plain-CSV HTTP transport.
 on:
   push:
     branches: [fix/monthly-data-recovery-20260904]
@@ -6,38 +7,49 @@ on:
 permissions:
   contents: read
 jobs:
-  diagnose:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 18
     steps:
-      - name: Test only the two original data providers
-        run: |
-          mkdir -p provider_diagnosis
-          python - <<'PY'
-          import concurrent.futures, json, pathlib, time, urllib.request
-          root=pathlib.Path('provider_diagnosis')
-          fred='https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQ100'
-          jobs=[
-            ('fred_original',fred,{'User-Agent':'qld-tqqq-signal-monitor/1.0 (notification-only quantitative model; GitHub issue #1)'}),
-            ('fred_nocache',fred,{'User-Agent':'Mozilla/5.0 monthly-signal-monitor/2.0','Cache-Control':'no-cache','Pragma':'no-cache'}),
-            ('ndx_same_index','https://query1.finance.yahoo.com/v8/finance/chart/%5ENDX?range=5y&interval=1d',{'User-Agent':'Mozilla/5.0 monthly-signal-monitor/2.0'})
-          ]
-          def probe(job):
-            name,url,headers=job; start=time.monotonic()
-            try:
-              with urllib.request.urlopen(urllib.request.Request(url,headers=headers),timeout=20) as r:
-                body=r.read(); code=r.status
-              (root/(name+'.txt')).write_bytes(body)
-              return {'name':name,'url':url,'status':code,'bytes':len(body),'seconds':time.monotonic()-start}
-            except Exception as e:
-              return {'name':name,'url':url,'error':str(e),'seconds':time.monotonic()-start}
-          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            results=list(pool.map(probe,jobs))
-          (root/'results.json').write_text(json.dumps(results,indent=2))
-          print(json.dumps(results,indent=2))
-          PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          name: monitor-provider-diagnosis
-          path: provider_diagnosis/
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r qld_tqqq_signal_monitor/requirements.txt
+      - run: python -m pytest qld_tqqq_signal_monitor/tests -q --junitxml=test-results.xml
+      - name: Verify frozen strategy source
+        run: test "$(git hash-object qld_tqqq_signal_monitor/monitor.py)" = "6288f18f8a65badc9d8a9738ff030452d5760e86"
+      - name: Validate live closing data without posting
+        timeout-minutes: 10
+        run: python qld_tqqq_signal_monitor/exact_monitor.py
+      - name: Audit past month-end without posting
+        timeout-minutes: 5
+        run: python qld_tqqq_signal_monitor/exact_monitor.py --report-date 2026-08-31 --output-dir replay_output
+      - name: Verify live freshness and historical isolation
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s = json.loads(Path('signal_output/status.json').read_text())
+          assert s['status'] == 'ok'
+          assert all(x['latest_date'] == s['expected_session'] for x in s['sources'].values())
+          r = json.loads(Path('replay_output/signal.json').read_text())
+          assert not r['publish_notification'] and r['mode'] == 'replay'
+          assert all(x['instruction'] == 'historical_only' for x in r['decisions'])
+          print(json.dumps(s, ensure_ascii=False, indent=2))
+          PY
+      - name: Archive scoped source and audit
+        if: always()
+        run: tar -czf monitor-source.tgz qld_tqqq_signal_monitor .github/workflows/qld-tqqq-signal.yml .github/workflows/qld-tqqq-tests.yml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: monitor-repair-validation
+          path: |
+            monitor-source.tgz
+            test-results.xml
+            signal_output/
+            replay_output/
           retention-days: 7
