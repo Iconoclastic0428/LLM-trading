@@ -1,0 +1,60 @@
+name: Isolated SPMO legacy-data recovery
+on:
+  push:
+    branches: [research/spmo-top1-20260910]
+    paths: [.github/workflows/research-spmo-extend.yml]
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download legacy price corpus and reference-date snapshot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          mkdir -p /tmp/spmo-legacy
+          cat > /tmp/recover.py <<'PY'
+          import concurrent.futures, csv, io, json, os, pathlib, urllib.request, urllib.parse, zipfile, hashlib, time
+          r=pathlib.Path('/tmp/spmo-legacy'); log=[]
+          def fetch(url,timeout=40):
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0 (compatible; QuantResearch/1.0)'}),timeout=timeout) as f: return f.read()
+          # Author-provided archived stock price ZIP, not today's universe.
+          url='https://huggingface.co/datasets/Zihan1004/FNSPID/resolve/main/Stock_price/full_history.zip'
+          try:
+              with urllib.request.urlopen(url,timeout=90) as f,open('/tmp/fnspid.zip','wb') as out:
+                  while True:
+                      c=f.read(1024*1024)
+                      if not c: break
+                      out.write(c)
+              z=zipfile.ZipFile('/tmp/fnspid.zip'); names=z.namelist(); (r/'fnspid-file-list.json').write_text(json.dumps(names)); print('archive entries',len(names),flush=True)
+              # Keep all equity price files compactly for offline name/coverage reconciliation.
+              with zipfile.ZipFile(r/'fnspid-csv.zip','w',zipfile.ZIP_DEFLATED,compresslevel=3) as out:
+                  for name in names:
+                      if name.lower().endswith('.csv'): out.writestr(pathlib.PurePosixPath(name).name,z.read(name))
+              log.append({'source':url,'ok':True,'entries':len(names),'sha256':hashlib.sha256(pathlib.Path('/tmp/fnspid.zip').read_bytes()).hexdigest()})
+          except Exception as e: log.append({'source':url,'ok':False,'error':str(e)})
+          urls={
+          'ivv_20170228.csv':'https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf/1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund&asOfDate=20170228',
+          'ivv_20170228.json':'https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf/1467271812596.ajax?fileType=json&tab=all&asOfDate=20170228',
+          'ivv_20170228_short.csv':'https://www.ishares.com/us/products/239726/1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund&asOfDate=20170228',
+          'ivv-2017-history.json':'https://api.github.com/repos/riazarbi/sp500-scraper/commits?path=ishares/sp500/csv/20170228.csv&per_page=2',
+          'ivv-wayback.json':'https://web.archive.org/cdx/search/cdx?url=ishares.com/us/products/239726/*asOfDate=20170228*&output=json&filter=statuscode:200&collapse=digest&filter=timestamp:2017|2018|2019|2020|2021|2022|2023|2024|2025|2026'
+          }
+          def one(kv):
+              name,url=kv
+              try:
+                  b=fetch(url,30);(r/name).write_bytes(b);return {'name':name,'ok':True,'bytes':len(b),'url':url}
+              except Exception as e:return {'name':name,'ok':False,'error':str(e),'url':url}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=5) as p: log+=list(p.map(one,urls.items()))
+          (r/'manifest.json').write_text(json.dumps(log,indent=2));print(json.dumps(log),flush=True)
+          PY
+          python /tmp/recover.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: spmo-legacy-recovery
+          path: /tmp/spmo-legacy/
+          retention-days: 7
