@@ -1,0 +1,37 @@
+name: Isolated delisted-price archive check
+on:
+  push:
+    branches: [research/spmo-top1-20260910]
+    paths: [.github/workflows/research-spmo-archive.yml]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Retrieve archive inventory and representative rows
+        run: |
+          mkdir -p /tmp/price-archive
+          python - <<'PY'
+          import urllib.request, pathlib, json
+          root=pathlib.Path('/tmp/price-archive')
+          urls={
+          'hf-original-tree.json':'https://huggingface.co/api/datasets/Zihan1004/FNSPID/tree/main/Stock_price',
+          'hf-parquet-tree.json':'https://huggingface.co/api/datasets/beachside1234/FNSPID/tree/main/Stock_price/full_history?limit=1000',
+          'MON.parquet':'https://huggingface.co/datasets/beachside1234/FNSPID/resolve/main/Stock_price/full_history/MON.parquet',
+          'UTX.parquet':'https://huggingface.co/datasets/beachside1234/FNSPID/resolve/main/Stock_price/full_history/UTX.parquet',
+          'AAPL.parquet':'https://huggingface.co/datasets/beachside1234/FNSPID/resolve/main/Stock_price/full_history/AAPL.parquet'}
+          logs=[]
+          for fn,url in urls.items():
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'quant-research/1.0'}),timeout=30) as r: raw=r.read()
+                  (root/fn).write_bytes(raw); logs.append({'name':fn,'bytes':len(raw),'ok':True})
+              except Exception as e: logs.append({'name':fn,'ok':False,'error':str(e)})
+          (root/'log.json').write_text(json.dumps(logs,indent=2)); print(logs)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: delisted-price-archive-check
+          path: /tmp/price-archive/
+          retention-days: 7
