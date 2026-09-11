@@ -1,0 +1,53 @@
+name: Isolated SPMO reference and legacy-price gap fill
+on:
+  push:
+    branches: [research/spmo-top1-20260910]
+    paths: [.github/workflows/research-spmo-gap.yml]
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Retrieve archived inputs without future-return selection
+        shell: bash
+        run: |
+          mkdir -p /tmp/spmo-gap
+          python - <<'PY'
+          import urllib.request,urllib.parse,pathlib,json,gzip,hashlib
+          root=pathlib.Path('/tmp/spmo-gap');log=[]
+          urls={
+          'wiki_prices.csv.gz':'https://media.githubusercontent.com/media/kmfranz/trading_pairs/master/WIKI_PRICES.csv',
+          'sp500_history.csv':'https://raw.githubusercontent.com/fja05680/sp500/master/'+urllib.parse.quote('S&P 500 Historical Components & Changes (Updated).csv'),
+          'ivv_20161230.csv':'https://raw.githubusercontent.com/riazarbi/sp500-scraper/88556c3b823d61377551bcbdd396c509854180d6/ishares/sp500/csv/20161230.csv',
+          'ivv_forks.json':'https://api.github.com/repos/riazarbi/sp500-scraper/forks?per_page=100',
+          'sp500_2017_wikipedia.json':'https://raw.githubusercontent.com/riazarbi/sp500-scraper/88556c3b823d61377551bcbdd396c509854180d6/README.md'}
+          for name,url in urls.items():
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'quantitative-research/1.0'}),timeout=60) as r:b=r.read()
+                  sha=hashlib.sha256(b).hexdigest()
+                  if name.endswith('.gz'):
+                      with gzip.open(root/name,'wb') as f:f.write(b)
+                  else:(root/name).write_bytes(b)
+                  log.append({'file':name,'url':url,'ok':True,'bytes':len(b),'sha256':sha});print(name,len(b),flush=True)
+              except Exception as e:log.append({'file':name,'url':url,'ok':False,'error':str(e)})
+          # A same-date historical copy is preferable to any approximate cap extrapolation.
+          found=False
+          if (root/'ivv_forks.json').exists():
+              forks=json.loads((root/'ivv_forks.json').read_text())
+              for x in forks[:25]:
+                  url='https://raw.githubusercontent.com/'+x['full_name']+'/'+x['default_branch']+'/ishares/sp500/csv/20170228.csv'
+                  try:
+                      with urllib.request.urlopen(url,timeout=8) as r:b=r.read()
+                      if b'symbol' in b[:100] and b'2017-02-28' in b:
+                          (root/'ivv_20170228_recovered.csv').write_bytes(b);log.append({'file':'ivv_20170228_recovered.csv','url':url,'ok':True,'bytes':len(b)});found=True;break
+                  except Exception:pass
+          log.append({'reference_20170228_found':found});(root/'manifest.json').write_text(json.dumps(log,indent=2));print(log)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: spmo-reference-gap-fill
+          path: /tmp/spmo-gap/
+          retention-days: 7
