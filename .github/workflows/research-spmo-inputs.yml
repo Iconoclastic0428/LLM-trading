@@ -1,4 +1,4 @@
-name: Isolated SPMO holdings data audit
+name: Isolated SPMO official holdings audit
 on:
   push:
     branches: [research/spmo-top1-20260910]
@@ -10,38 +10,37 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Retrieve public source data only
+      - name: Retrieve issuer endpoints and public implementation assets
         shell: bash
         run: |
           mkdir -p /tmp/spmo-inputs
           /usr/bin/python3 - <<'PY'
-          import urllib.request, urllib.parse, json, pathlib, hashlib, concurrent.futures, re
+          import urllib.request, urllib.parse, json, pathlib, hashlib, concurrent.futures
           root=pathlib.Path('/tmp/spmo-inputs')
+          base='https://dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/46138E339/holdings/fund?idType=cusip&productType=ETF'
           jobs={
-            'tracker.zip':'https://codeload.github.com/nimohunter/spmo_track/zip/refs/heads/main',
-            'issuer.html':'https://www.invesco.com/us/en/financial-products/etfs/invesco-sp-500-momentum-etf.html',
-            'holdings_current.csv':'https://www.invesco.com/us/financial-products/etfs/holdings/main/holdings/0?audienceType=Investor&action=download&ticker=SPMO',
-            'holdings_20260320.csv':'https://www.invesco.com/us/financial-products/etfs/holdings/main/holdings/0?audienceType=Investor&action=download&ticker=SPMO&asOfDate=03%2F20%2F2026',
-            'holdings_20160318.csv':'https://www.invesco.com/us/financial-products/etfs/holdings/main/holdings/0?audienceType=Investor&action=download&ticker=SPMO&asOfDate=03%2F18%2F2016',
-            'submissions.json':'https://data.sec.gov/submissions/CIK0001378872.json',
-            'wayback.json':'https://web.archive.org/cdx/search/cdx?url=www.invesco.com/us/financial-products/etfs/holdings/main/holdings/0%3F*ticker%3DSPMO*&output=json&filter=statuscode:200&collapse=timestamp:6&filter=mimetype:text/csv',
+            'official_current.json':base,
+            'official_20260320.json':base+'&asOfDate=2026-03-20',
+            'official_20160318.json':base+'&asOfDate=2016-03-18',
+            'common.js':'https://www.invesco.com/etc.clientlibs/invesco/clientlibs/clientlib-common.min.ACSHASH56022bacefa37bd60eb6db3c46a8b86a.js',
+            'master.js':'https://www.invesco.com/etc.clientlibs/invesco/clientlib-master/clientlib-invescoBrand3.0.min.ACSHASH41afcca3eb490027dc7bf4b4671af8ae.js',
+            'edgar_search.json':'https://efts.sec.gov/LATEST/search-index?dateRange=custom&startdt=2015-10-01&enddt=2026-09-10&forms=NPORT-P&ciks=1378872&q=%22S000050154%22&from=0&size=100',
+            'wayback.json':'https://web.archive.org/cdx/search/cdx?url=www.invesco.com/us/financial-products/etfs/holdings*ticker%3DSPMO*&output=json&filter=statuscode:200&collapse=timestamp:6',
           }
           def fetch(kv):
             name,url=kv
             try:
-              req=urllib.request.Request(url,headers={'User-Agent':'SPMO research audit contact 69107884+Iconoclastic0428@users.noreply.github.com'})
-              with urllib.request.urlopen(req,timeout=30) as r:
+              req=urllib.request.Request(url,headers={'User-Agent':'SPMO historical research 69107884+Iconoclastic0428@users.noreply.github.com','Origin':'https://www.invesco.com','Referer':'https://www.invesco.com/'})
+              with urllib.request.urlopen(req,timeout=35) as r:
                 data=r.read(); info={'name':name,'requested_url':url,'final_url':r.url,'status':r.status,'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
               (root/name).write_bytes(data)
               return info
-            except Exception as e: return {'name':name,'url':url,'error':str(e)}
-          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            results=list(pool.map(fetch,jobs.items()))
-          print(json.dumps(results,indent=2))
-          (root/'manifest.json').write_text(json.dumps(results,indent=2))
+            except Exception as e:return {'name':name,'url':url,'error':str(e)}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:results=list(pool.map(fetch,jobs.items()))
+          print(json.dumps(results,indent=2));(root/'manifest.json').write_text(json.dumps(results,indent=2))
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: spmo-source-audit
+          name: spmo-official-api-audit
           path: /tmp/spmo-inputs
           retention-days: 7
