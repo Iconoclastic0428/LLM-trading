@@ -1,0 +1,48 @@
+name: Isolated VIX enhancement R2 data
+on:
+  push:
+    branches: [research/vix-enhancement-r2-20260914]
+    paths: [.github/workflows/research-vix3m-r2.yml]
+permissions:
+  contents: read
+jobs:
+  data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Freeze hypotheses and download official data
+        run: |
+          mkdir -p out
+          cat > out/hypotheses.txt <<'TXT'
+          Frozen before new performance. Local full protocol SHA256 cb169c46c4ca9ff869a0981528db584f050049c2188b6a98f5bf0b0328ab3685.
+          BASE is unchanged monthly production core. C20 is previous monthly SR_floor.
+          MULTI uses median recovery strengths at peaks10/20/40, same63/252 normalization.
+          BRIDGE extra exposure=0.5*R20*(1-score), same risk cap, monthly only.
+          TERM uses C20 only when VIX<=VIX3M; missing data disables extra, no history fabrication.
+          Compare both ETFs against BASE and C20; all new3*assets2*comparators2=12 Holm tests.
+          No promotion if robustness/execution gates fail; main is not changed by this workflow.
+          TXT
+          /usr/bin/python3 - <<'PY'
+          import urllib.request,concurrent.futures,pathlib,json,hashlib,datetime
+          root=pathlib.Path('out')
+          urls={
+            'VIX3M_History.csv':'https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX3M_History.csv',
+            'VIX_History.csv':'https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv',
+            'vxvdailyprices.csv':'https://cdn.cboe.com/resources/indices/documents/vxvdailyprices.csv',
+          }
+          def get(it):
+            name,url=it
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'}),timeout=30) as r:b=r.read()
+              (root/name).write_bytes(b)
+              return {'file':name,'url':url,'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),'retrieved_utc':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+            except Exception as e:return {'file':name,'url':url,'error':str(e)}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:r=list(ex.map(get,urls.items()))
+          (root/'manifest.json').write_text(json.dumps(r,indent=2));print(json.dumps(r,indent=2))
+          PY
+      - name: Archive data
+        uses: actions/upload-artifact@v4
+        with:
+          name: vix-enhancement-r2-data
+          path: out/
+          retention-days: 7
