@@ -26,16 +26,56 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: qld_tqqq_signal_monitor/requirements.txt
-
       - name: Install dependencies
         run: python -m pip install -r qld_tqqq_signal_monitor/requirements.txt
-
       - name: Run monthly-strategy regression tests
         run: python -m pytest qld_tqqq_signal_monitor/tests
+      - name: Run isolated C20 Q70 shadow tests
+        run: python -m pytest qld_tqqq_signal_monitor/shadow_tests -q
+
+  shadow-smoke:
+    needs: test
+    # This job cannot publish issues and never invokes publish_status.py.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r qld_tqqq_signal_monitor/requirements.txt
+      - name: Generate read-only baseline audit
+        timeout-minutes: 10
+        run: python qld_tqqq_signal_monitor/exact_monitor.py --output-dir shadow_base_audit
+      - name: Generate real-data shadow comparison
+        timeout-minutes: 4
+        run: python qld_tqqq_signal_monitor/vix_shadow.py --base-dir shadow_base_audit
+      - name: Preserve smoke audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: q70-shadow-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            shadow_base_audit/
+            shadow_output/
+          retention-days: 30
+      - name: Show smoke outcome
+        if: always()
+        run: |
+          if [ -f shadow_output/report.md ]; then cat shadow_output/report.md >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ ! -f shadow_output/shadow.json ]; then echo "Shadow smoke did not produce a verified comparison." >> "$GITHUB_STEP_SUMMARY"; fi
