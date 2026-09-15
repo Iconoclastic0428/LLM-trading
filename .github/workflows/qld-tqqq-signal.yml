@@ -101,3 +101,32 @@ jobs:
         run: |
           if [ -f signal_output/report.md ]; then cat signal_output/report.md >> "$GITHUB_STEP_SUMMARY"; fi
           if [ -f signal_output/publication.json ]; then cat signal_output/publication.json >> "$GITHUB_STEP_SUMMARY"; fi
+      # Production publication and its audit are complete before shadow work starts.
+      # A shadow failure must not block or replace the BASE monthly notification.
+      - name: Compare C20 and Q70 shadow targets
+        if: always() && steps.generate.outcome == 'success'
+        id: shadow
+        continue-on-error: true
+        timeout-minutes: 4
+        env:
+          VIX_SHADOW_ENABLED: ${{ vars.VIX_SHADOW_ENABLED || 'true' }}
+        run: python qld_tqqq_signal_monitor/vix_shadow.py
+      - name: Preserve separate shadow audit
+        if: always() && steps.generate.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: qld-tqqq-vix-shadow-${{ github.run_id }}-${{ github.run_attempt }}
+          path: shadow_output/
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Add shadow status without changing production status
+        if: always() && steps.generate.outcome == 'success'
+        env:
+          SHADOW_OUTCOME: ${{ steps.shadow.outcome }}
+        run: |
+          if [ -f shadow_output/report.md ]; then cat shadow_output/report.md >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ "$SHADOW_OUTCOME" != "success" ]; then
+            echo "::warning::Shadow validation failed or timed out; BASE output is unchanged."
+            echo "Shadow step outcome: $SHADOW_OUTCOME. No valid shadow target should be inferred." >> "$GITHUB_STEP_SUMMARY"
+          fi
