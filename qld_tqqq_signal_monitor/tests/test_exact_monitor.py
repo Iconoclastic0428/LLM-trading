@@ -90,7 +90,10 @@ def test_workflow_is_redundant_observable_and_month_end_gated() -> None:
     ).read_text(encoding="utf-8")
 
     assert workflow.startswith("name: QLD TQQQ monthly signal")
-    assert 'cron: "7 * * * *"' in workflow
+    assert 'cron: "7,37 * * * *"' in workflow
+    assert "qld_tqqq_signal_monitor/run_window.py" in workflow
+    assert "path: run_window_audit/" in workflow
+    assert "qld-tqqq-run-window-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert "Publish signal and recovery status" in workflow
     assert "qld_tqqq_signal_monitor/exact_monitor.py" in workflow
     assert "qld_tqqq_signal_monitor/publish_status.py" in workflow

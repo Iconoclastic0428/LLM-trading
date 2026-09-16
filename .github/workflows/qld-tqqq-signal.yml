@@ -1,9 +1,10 @@
 name: QLD TQQQ monthly signal
+run-name: "Monthly BASE / C20 / Q70 audit (${{ github.event_name }})"
 
 on:
   schedule:
-    # Explicit UTC. Hourly eligibility checks tolerate missed/delayed cron events.
-    - cron: "7 * * * *"
+    # UTC fallback opportunities twice hourly; delivery is still best-effort.
+    - cron: "7,37 * * * *"
   push:
     branches: [main]
     paths: ["qld_tqqq_signal_monitor/**", ".github/workflows/qld-tqqq-signal.yml"]
@@ -33,23 +34,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Select overnight check window
+      - name: Select post-close check window and record eligibility
         id: window
         env:
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          python - <<'PY'
-          from datetime import datetime
-          import os
-          from zoneinfo import ZoneInfo
-          pt = datetime.now(ZoneInfo('America/Los_Angeles'))
-          # UTC cron is hourly; only PT 18:00-06:59 performs market-data work.
-          # Include weekends/holidays for month-end catch-up; no intraday orders.
-          eligible = os.environ['EVENT_NAME'] != 'schedule' or pt.hour >= 18 or pt.hour <= 6
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f'run={str(eligible).lower()}\n')
-          print(f'Actual runner time: {pt.isoformat()}; eligible={eligible}')
-          PY
+          SCHEDULE_EXPRESSION: ${{ github.event.schedule }}
+        run: python qld_tqqq_signal_monitor/run_window.py
       - name: Set up Python
         if: steps.window.outputs.run == 'true'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -130,3 +119,12 @@ jobs:
             echo "::warning::Shadow validation failed or timed out; BASE output is unchanged."
             echo "Shadow step outcome: $SHADOW_OUTCOME. No valid shadow target should be inferred." >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Preserve scheduler decision even when market-data work was skipped
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: qld-tqqq-run-window-${{ github.run_id }}-${{ github.run_attempt }}
+          path: run_window_audit/
+          if-no-files-found: warn
+          retention-days: 30
