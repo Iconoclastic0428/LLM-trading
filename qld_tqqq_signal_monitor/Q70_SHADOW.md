@@ -31,11 +31,20 @@ most 25% overlay weight and TQQQ at most 16.667%, subject to the volatility cap.
 
 ## Operation
 
-The existing `QLD TQQQ monthly signal` workflow still checks hourly at UTC minute
-7 and only performs scheduled market-data work in the PT 18:00-06:59 window.
-GitHub cron is best effort. No new exact-time execution guarantee is introduced.
-The strategy still sets new targets only after a completed month-end, with the
-next session open as the reference execution time.
+Following the September 15 PT scheduling incident, the existing `QLD TQQQ monthly
+signal` workflow requests runs at UTC minutes 7 and 37 each hour. Scheduled
+market-data work is allowed from PT 14:00 through the next day 06:59, using the
+actual runner clock and America/Los_Angeles for DST. The former 18:00 gate wasted
+a delivered 17:09 post-close event. Each delivered run now records eligibility
+or an explicit skip in its summary and a separate `qld-tqqq-run-window` artifact.
+See [the incident report](SCHEDULE_INCIDENT_2026-09-15.md).
+
+GitHub cron is best effort. The added opportunity uses the same scheduler and is
+not an independent failover or an exact-time guarantee. The strategy still sets
+new targets only after a completed month-end, with the next session open as the
+reference execution time. Existing latest-completed-session, stale-data and
+publication-deadline checks are unchanged; earlier checks never authorize use of
+an incomplete bar. Missing source data is reported and retried, not substituted.
 
 After BASE publication and its audit upload finish, the shadow step reads that
 run's `signal_output/status.json`, `month_end.json` and `verified_closes.csv`.
