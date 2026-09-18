@@ -97,7 +97,11 @@ def append_history(history, tail, report, calendar, now=None):
     error = float(np.max(np.abs(h.loc[overlap].to_numpy()/tail.loc[overlap].to_numpy()-1)))
     if not np.isfinite(error) or error > TOLERANCE:
         raise RecoveryError(f'QQQ Yahoo/Nasdaq price-basis mismatch: {error:.6%}')
-    result = pd.concat([h, tail.loc[missing]]).rename('QQQ')
+    addition = tail.loc[missing].copy()
+    # Daily dates are exact in every supported storage unit. Keep the anchor's
+    # unit when joining parsed strings to epoch-derived Yahoo timestamps.
+    addition.index = addition.index.as_unit(h.index.unit)
+    result = pd.concat([h, addition]).rename('QQQ')
     detail = {'method':'QQQ_Yahoo_anchor_Nasdaq_append_only','anchor_end':str(h.index[-1].date()),
               'overlap_sessions':OVERLAP, 'max_relative_overlap_error':error,
               'appended':{str(d.date()):float(tail.loc[d]) for d in missing}}
