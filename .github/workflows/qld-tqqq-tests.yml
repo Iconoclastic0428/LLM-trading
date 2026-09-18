@@ -68,6 +68,9 @@ jobs:
       - name: Exercise same-index fallback with real data
         timeout-minutes: 3
         run: python qld_tqqq_signal_monitor/ndx_fallback.py --probe-dir ndx_fallback_probe
+      - name: Exercise QQQ independent recovery with real data
+        timeout-minutes: 4
+        run: python qld_tqqq_signal_monitor/qqq_recovery.py --probe-dir qqq_recovery_probe
       - name: Preserve smoke audit
         if: always()
         uses: actions/upload-artifact@v4
@@ -77,6 +80,7 @@ jobs:
             shadow_base_audit/
             shadow_output/
             ndx_fallback_probe/
+            qqq_recovery_probe/
           retention-days: 30
       - name: Show smoke outcome
         if: always()
