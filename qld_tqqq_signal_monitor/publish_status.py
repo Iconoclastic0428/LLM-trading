@@ -9,6 +9,8 @@ import re
 import subprocess
 from zoneinfo import ZoneInfo
 
+import health_checkpoint
+
 HEARTBEAT = '<!-- qld-tqqq-automation-heartbeat -->'
 
 
@@ -118,6 +120,7 @@ def publish(output_dir: Path, client, env=None, now=None) -> int:
         return 0
     comments = client.comments()
     plan = publication_plan(status, comments, now)
+    last_verified = health_checkpoint.choose(status, comments, env, now)
     run_url = f'https://github.com/{client.repo}/actions/runs/{env.get("GITHUB_RUN_ID", "unknown")}'
     if plan == 'publish':
         # Recheck the deadline immediately before sending, not just at generation.
@@ -160,6 +163,14 @@ def publish(output_dir: Path, client, env=None, now=None) -> int:
         ('该信号发布截止UTC', status.get('month_end', {}).get('publish_deadline', 'unknown')),
         ('自动交易', '未接券商，无自动下单'),
     ]
+    if last_verified:
+        rows.extend([('最近成功核验交易日', last_verified['report_date']),
+                     ('最近成功核验时间UTC', last_verified['verified_at']),
+                     ('最近成功运行', last_verified['run_id']),
+                     ('本次请求与历史核验', '本次失败；保留历史核验记录，不生成新信号'
+                      if status.get('status') != 'ok' else '本次数据核验成功')])
+    else:
+        rows.append(('最近成功核验记录', '无可用的机器可读检查点；不推断历史成功'))
     for symbol, source in status.get('sources', {}).items():
         rows.append((f'{symbol} 已核验收盘', f'{source["latest_date"]} / {source["close"]:.4f}'))
         rows.append((f'{symbol} 来源', source['source']))
@@ -171,9 +182,11 @@ def publish(output_dir: Path, client, env=None, now=None) -> int:
             '这是带时间戳的最近一次结果，不是实时保证。GitHub cron可能延迟或丢失；'
             '凌晨补跑使用最近已完成的真实交易日，绝不拿旧价格冒充新收盘。'
             '非月末只更新这条状态，不新增交易信号。\n')
+    if last_verified:
+        body += '\n' + health_checkpoint.encode(last_verified) + '\n'
     client.upsert(HEARTBEAT, body, comments)
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / 'publication.json').write_text(json.dumps({'plan': plan, 'at': now.isoformat()}, indent=2), encoding='utf-8')
+    (output_dir / 'publication.json').write_text(json.dumps({'plan': plan, 'at': now.isoformat(), 'latest_attempt_status': status.get('status'), 'last_verified': last_verified}, indent=2), encoding='utf-8')
     return 2 if plan in ('data_error', 'missed_deadline') else 0
 
 

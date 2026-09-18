@@ -16,6 +16,7 @@ import monitor
 import reliable_data as data
 import automation as auto
 import publish_status as pub
+import qqq_recovery
 
 
 @pytest.fixture
@@ -126,7 +127,7 @@ def test_semantic_retry_succeeds_after_stale_attempt(monkeypatch, prices):
         count[0] += 1
         if count[0] == 1: raise data.DataUnavailable('HTTP 200 stale')
         return q
-    monkeypatch.setattr(data, 'get_qqq', qqq)
+    monkeypatch.setattr(qqq_recovery, 'get_qqq_reliable', qqq)
     monkeypatch.setattr(data, 'get_ndx', lambda *args: n)
     result = data.load_prices(q.index[-1], [], sleeper=sleeps.append,
                               session_factory=lambda: Session([]))
@@ -135,7 +136,7 @@ def test_semantic_retry_succeeds_after_stale_attempt(monkeypatch, prices):
 
 def test_retry_exhaustion_raises(monkeypatch, prices):
     def fail(*args): raise data.DataUnavailable('stale')
-    monkeypatch.setattr(data, 'get_qqq', fail)
+    monkeypatch.setattr(qqq_recovery, 'get_qqq_reliable', fail)
     sleeps = []
     with pytest.raises(data.DataUnavailable, match='3 attempts'):
         data.load_prices(prices[0].index[-1], [], sleeper=sleeps.append,

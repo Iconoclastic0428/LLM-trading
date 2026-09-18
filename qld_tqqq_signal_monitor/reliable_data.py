@@ -191,11 +191,12 @@ def get_ndx(session, report: pd.Timestamp, audit: list[dict]) -> pd.Series:
 def load_prices(report: pd.Timestamp, audit: list[dict], attempts: int = 3,
                 sleeper=time.sleep, session_factory=http_session):
     from ndx_loader import get_ndx_reliable
+    from qqq_recovery import get_qqq_reliable
     for attempt in range(1, attempts + 1):
         try:
             with session_factory() as session:
                 audit.append({'attempt': attempt, 'started_at': datetime.now(timezone.utc).isoformat()})
-                qqq = get_qqq(session, report, audit)
+                qqq = get_qqq_reliable(session, report, audit)
                 ndx = get_ndx_reliable(session, report, audit)
                 monitor.validate_cross_source(qqq, ndx, report)
                 return qqq, ndx

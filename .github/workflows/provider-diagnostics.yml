@@ -1,0 +1,34 @@
+name: Read-only market provider diagnostics
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'qld_tqqq_signal_monitor/provider_diagnostics.py'
+      - '.github/workflows/provider-diagnostics.yml'
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r qld_tqqq_signal_monitor/requirements.txt
+      - name: Inspect real provider replies without publishing signals
+        run: python qld_tqqq_signal_monitor/provider_diagnostics.py
+      - name: Preserve diagnosis and exact public source snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-diagnostics-${{ github.run_id }}
+          path: |
+            provider_diagnostics/
+            qld_tqqq_signal_monitor/
+            .github/workflows/
+          retention-days: 30
