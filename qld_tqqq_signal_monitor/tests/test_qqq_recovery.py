@@ -124,7 +124,14 @@ def test_stale_yahoo_end_to_end_source_wrapper(monkeypatch,example):
     result=q.get_qqq_reliable(S(),REPORT,audit)
     assert result.index[-1]==REPORT
     assert 'Nasdaq' in result.attrs['source']
-    pd.testing.assert_series_equal(result,s,check_freq=False)
+    # pandas 3 may decode epoch seconds as microseconds while the synthetic
+    # calendar uses nanoseconds. Compare identical dates at a common resolution,
+    # and separately require exact preservation of the decoded anchor itself.
+    expected = s.copy()
+    expected.index = expected.index.as_unit(result.index.unit)
+    pd.testing.assert_series_equal(result,expected,check_freq=False)
+    anchor = data.chart_series(chart(s.iloc[:-1]))
+    pd.testing.assert_series_equal(result.loc[anchor.index],anchor,check_freq=False)
     assert any(x.get('request')=='verified_qqq_tail' for x in audit)
 
 

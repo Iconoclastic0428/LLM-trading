@@ -14,10 +14,10 @@ September 17 data had never become available. Cache/backend inconsistency is a
 plausible explanation, but the artifacts do not reveal the provider's internals.
 
 At about 19:47 PDT, the runs API returned zero scheduled runs created since
-17:30 PDT. The six visible scheduled runs that day before inspection were at
-02:55, 07:50, 11:55, 15:03, and 17:04 PDT (five on September 17 itself), with the
-prior run at September 16 21:41 PDT. This does not match the requested :07/:37
-half-hour cadence. A manual/push recovery is not evidence of cron reliability.
+17:30 PDT. The five visible scheduled runs on September 17 before inspection were
+at 02:55, 07:50, 11:55, 15:03, and 17:04 PDT. The preceding scheduled run was at
+September 16 21:41 PDT. This does not match the requested :07/:37 half-hour cadence.
+A manual/push recovery is not evidence of cron reliability.
 
 Read-only diagnostic run 35300793938 at 19:48 PDT obtained September 17 QQQ data
 from all five Yahoo request variants and the Nasdaq historical table. This
@@ -57,7 +57,10 @@ loader/cross-source validation. No production feed or account is mutated.
 The unmodified primary path is exercised separately by the normal smoke run.
 
 Local combined suite: 187 tests passed (134 production/data/health and 53 shadow).
-Cloud test and live probe results are recorded in PR #10 when actually observed.
+The first cloud suite found a new test's ns/us datetime-storage-unit assertion;
+the test now compares equal calendar dates at a common resolution and separately
+requires exact preservation of the decoded anchor. No prices or strategy formula
+were changed to satisfy that test. Final cloud results are recorded in PR #10.
 Existing monthly timing, trend/VIX formulas, limits, deadline and publication
 deduplication are unchanged. C20/Q70 remain shadow-only. No orders are placed.
 
