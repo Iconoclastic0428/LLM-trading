@@ -1,63 +1,80 @@
-# September 16, 2026: NDX close publication lag
+# NDX source recovery
 
-## Incident
+FRED NASDAQ100 remains the complete historical anchor. Only the missing one to
+five trailing sessions may come from validated Yahoo daily ^NDX price-index bars.
+The strategy, risk limits, monthly timing, publisher and Q70 shadow boundary are
+unchanged. No proxy, interpolation, rescaling or wholesale source replacement.
 
-Scheduled main run 35163838933 began at 16:47 PDT on September 16. Eligibility
-passed and all 58 pre-existing regression tests passed. Generation failed because
-QQQ had September 16 data while FRED NASDAQ100's canonical, bounded and recent
-exports all ended September 15. Three complete retries failed. The publisher
-returned exit 2 because it recorded a data error, not because a second publication
-API failure had been established. C20/Q70 correctly did not run without verified
-core data. Node/upload-artifact deprecation warnings were not the failing step.
+## September 24, 2026 regression
 
-This differs from the prior scheduling incident. Moving checks earlier exposed a
-single-provider publication dependency. Neither a longer polling window nor more
-requests can manufacture an unpublished FRED close. We retain strict freshness
-and introduce a verified same-index tail fallback instead of hiding the error.
+Scheduled run 36068761560 at 15:40 PDT passed 137 tests but failed on the NDX
+fallback. FRED ended September 23; Yahoo had valid September 24 OHLC but returned
+all-null OHLC for September 22, which FRED already supplied as 30732.40.
 
-## Data policy
+Read-only diagnostics run 36070251013 captured both Yahoo hosts with that same
+null historical row. Its archive SHA256 is
+725473624f4a0b84cbf90796c83e993fd3c54888d2a7310a4b580fd5038a6147.
+Replaying those exact bytes locally reproduces the old all-OHLC rejection.
+The old 90-day response validator incorrectly made importing a new daily bar
+contingent on redundant historical OHLC that never enters the strategy.
 
-`reliable_data.load_prices` now calls `ndx_loader.get_ndx_reliable`. The original
-FRED reader and all its validation remain unchanged and run first. When they
-cannot supply the requested session, the wrapper acquires a valid FRED historical
-anchor. If FRED has meanwhile caught up, it is used without contacting Yahoo.
-Otherwise `ndx_fallback` may append Yahoo Finance's daily **^NDX price index** bars.
+## Revised validation contract
 
-Requirements for fallback:
+1. Validate the FRED anchor first: at least 500 observations, complete recent
+   260-session grid, no interior repair, and at most five missing tail sessions.
+2. Validate exact ^NDX / INDEX / USD / America/New_York / 1d identity and the
+   provider timestamp. The report must be at least 30 minutes past session close.
+3. Every new tail session must have finite, positive, internally consistent OHLC.
+   Missing new dates or fields still fail. Metadata quotes are never used as closes.
+4. Historical Yahoo rows only cross-check the FRED closes. Within the last 25
+   anchor sessions, require at least 20 non-missing comparison closes and no more
+   than five unavailable dates. Compare ALL available closes, not a selected
+   best-matching subset; the maximum relative error remains 0.01% (one basis point).
+   A present but invalid or disagreeing reference close still fails. Null or absent
+   reference dates are individually recorded along with the retained FRED values.
+   Their Yahoo OHLC is neither repaired nor imported.
+5. Append only missing new closes. Preserve all FRED values, dates and datetime
+   storage resolution exactly. Run the original final date/grid and QQQ/NDX
+   cross-checks before calculating any target.
 
-- Valid FRED anchor with at least 500 observations and a complete recent 260-session
-  grid. Missing interior history is not repaired using the fallback.
-- Exactly one to five missing tail sessions, with all required tail dates present.
-- Correct ^NDX / INDEX / USD / America/New_York / 1d metadata and valid OHLC bars.
-- The report session must have closed at least 30 minutes earlier, and the
-  provider's timestamp must be at or after that close. Same-date cached morning
-  bars are rejected. `regularMarketPrice` is never used to fill a daily close.
-- The previous 20 consecutive exchange-session closes must exist in both
-  sources. Maximum relative difference must not exceed one basis point.
-- All original FRED observations are preserved exactly. No QQQ substitution,
-  extrapolation, forward fill, index rescaling or wholesale provider replacement.
-- The resulting series must still pass the original complete-session validation
-  and QQQ/NDX trailing-return cross-check before any strategy calculation.
+This deliberately changes the reference-overlap rule from 20 consecutive complete
+Yahoo rows to at least 20 matching closes within a bounded 25-session window.
+It does NOT loosen completeness for the final strategy input or for any newly
+imported daily bar. With insufficient overlap or bad new data, generation fails.
+Direct daily_ndx calls without an anchor and append_tail calls without the scoped
+option retain their earlier strict behavior; production opts in only after a valid
+FRED anchor has been established.
 
-The audit records source, FRED anchor end, overlap error, each appended date/value
-and a response hash. Future runs prefer FRED again when it is complete. Providers
-can revise history, so archived inputs remain essential. The added Yahoo endpoint
-is an operational fallback, not a guarantee of independently verified official
-same-day settlement. Both Yahoo hosts share a provider. Any failed validation
-still stops signal generation; no previous close is relabeled as current.
+The exact September 24 replay compares 24 available sessions (one null reference),
+with maximum relative difference 3.2525474158440204e-07, and appends only September
+24 close 30478.85546875. All 10,262 FRED observations remain identical. An ordinary
+future run can still prefer FRED when it has caught up.
 
-## Verification
+## Verification and diagnostics
 
-New tests include delayed FRED, append-only parity, incomplete bars, cached intraday
-metadata, wrong instruments, insufficient overlap, gaps, excessive staleness and
-failure of both fallback hosts. Original production and shadow suites are retained.
+31 additional cases cover the historical-null incident, missing historical OHLC,
+one/five/six unavailable references, mismatching non-null closes, every new OHLC
+field, missing new timestamps, duplicates, future-data perturbation, exact anchor
+preservation and the actual load_prices entrypoint. The local combined suite is
+221 passing tests (all existing tests retained). Cloud CI and live probe results
+are recorded in PR #11 rather than assumed from local execution.
 
-The read-only CI smoke job exercises both the real pipeline and an explicit
-fallback probe. When FRED is current, that probe deliberately withholds its last
-row, reconstructs it using the fallback and checks agreement. The probe is not a
-production price override and never publishes a notification or places an order.
-Its JSON identifies whether a FRED row was deliberately withheld.
+provider_diagnostics.py now captures exact bad OHLC dates and fields for both
+Yahoo NDX hosts and the FRED anchor. It is read-only. The existing live NDX probe
+uses the normal QQQ recovery wrapper, rather than accidentally bypassing the QQQ
+fallback while testing NDX.
 
-The schedule, monthly timing, strategy formulas, risk caps, next-open cutoff,
-publication deduplication, and Q70 shadow-only status are unchanged. No dependency
-version, API key or broker connection is added.
+## Remaining operational limits
+
+This repairs the reproduced validation defect, not all provider or scheduler
+outages. GitHub cron remains best effort. There is still no independently scheduled
+failover or restored durable full-history market cache. A successful push run does
+not guarantee later schedule delivery. Data errors must remain explicit, and no
+stale daily value can be relabeled as the requested close.
+
+## Earlier incident
+
+On September 16, run 35163838933 exposed FRED's publication lag. PR #9 introduced
+the same-index append-only fallback. PR #10 independently addressed stale QQQ
+responses. This revision keeps those source priorities and final input checks;
+it corrects an overly broad Yahoo validation dependency in the NDX fallback.
