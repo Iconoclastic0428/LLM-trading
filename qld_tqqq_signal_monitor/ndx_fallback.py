@@ -18,6 +18,7 @@ URLS = ("https://query1.finance.yahoo.com/v8/finance/chart/%5ENDX",
         "https://query2.finance.yahoo.com/v8/finance/chart/%5ENDX")
 MAX_TAIL_SESSIONS = 5
 OVERLAP_SESSIONS = 20
+MAX_UNAVAILABLE_OVERLAP = 5
 MAX_RELATIVE_ERROR = 0.0001  # one basis point, same price index
 
 
@@ -71,7 +72,13 @@ def validate_anchor(history, report, calendar, now=None):
     return h, added
 
 
-def daily_ndx(payload, report, calendar, now=None):
+def daily_ndx(payload, report, calendar, now=None, *, anchor_end=None):
+    """Decode a daily response, separating reference closes from new OHLC.
+
+    With a validated FRED anchor, historical OHLC is not imported. Missing
+    historical Yahoo closes remain NaN until append_tail audits their exclusion.
+    Without an anchor this retains the original strict all-OHLC contract.
+    """
     chart = payload["chart"]
     if chart.get("error"):
         raise TailUnavailable(f"Yahoo chart error: {chart['error']}")
@@ -90,31 +97,84 @@ def daily_ndx(payload, report, calendar, now=None):
     if not stamps or any(len(quote[k]) != len(stamps) for k in ("open", "high", "low", "close")):
         raise TailUnavailable("Daily OHLC/timestamp lengths differ")
     idx = pd.to_datetime(stamps, unit="s", utc=True).tz_convert("America/New_York").tz_localize(None).normalize()
-    frame = pd.DataFrame({k: pd.to_numeric(quote[k], errors="raise") for k in ("open", "high", "low", "close")}, index=idx)
+    frame = pd.DataFrame({k: quote[k] for k in ("open", "high", "low", "close")}, index=idx)
     frame = frame.loc[frame.index <= report].sort_index()
-    a = frame.to_numpy(dtype=float)
-    if (frame.empty or frame.index.hasnans or frame.index.has_duplicates or not np.isfinite(a).all()
-            or (a <= 0).any() or (frame.low > frame.high).any()
-            or (frame.close < frame.low).any() or (frame.close > frame.high).any()
-            or (frame.open < frame.low).any() or (frame.open > frame.high).any()):
-        raise TailUnavailable("Invalid or incomplete daily ^NDX OHLC")
-    return frame.close.rename("NDX")
+    if frame.empty or frame.index.hasnans or frame.index.has_duplicates:
+        raise TailUnavailable("Invalid/duplicate daily ^NDX OHLC dates")
+    if anchor_end is not None:
+        anchor_end = pd.Timestamp(anchor_end)
+        if (anchor_end.tzinfo is not None or anchor_end != anchor_end.normalize()
+                or anchor_end >= report or not calendar.is_session(anchor_end)):
+            raise TailUnavailable("Invalid FRED anchor end for daily ^NDX validation")
+        start = sessions(calendar, anchor_end - pd.Timedelta(days=60), anchor_end)[
+            -(OVERLAP_SESSIONS + MAX_UNAVAILABLE_OVERLAP)]
+        frame = frame.loc[frame.index >= start].copy()
+        # These closes only cross-check the immutable FRED anchor. OHLC fields
+        # on those rows are never used as strategy prices or new market bars.
+        historical = frame.loc[frame.index <= anchor_end, "close"]
+        numeric = pd.to_numeric(historical, errors="raise")
+        invalid = numeric.notna() & (~np.isfinite(numeric) | (numeric <= 0))
+        if invalid.any():
+            raise TailUnavailable("Invalid historical ^NDX close: " +
+                                  ", ".join(str(d.date()) for d in numeric.index[invalid]))
+        frame.loc[numeric.index, "close"] = numeric
+        new = frame.loc[frame.index > anchor_end].copy()
+    else:
+        new = frame.copy()
+    for field in ("open", "high", "low", "close"):
+        new[field] = pd.to_numeric(new[field], errors="raise")
+    a = new.to_numpy(dtype=float)
+    bad = pd.Series(~np.isfinite(a).all(axis=1) | (a <= 0).any(axis=1), index=new.index)
+    bad |= ((new.low > new.high) | (new.close < new.low) | (new.close > new.high)
+            | (new.open < new.low) | (new.open > new.high))
+    if new.empty or bad.any() or report not in new.index:
+        dates = ", ".join(str(d.date()) for d in new.index[bad])
+        raise TailUnavailable("Invalid or incomplete daily ^NDX OHLC: " +
+                              (dates or "missing report session " + str(report.date())))
+    return pd.to_numeric(frame.close, errors="raise").astype(float).rename("NDX")
 
 
-def append_tail(history, tail, report, calendar, now=None):
+def append_tail(history, tail, report, calendar, now=None, *, allow_sparse_overlap=False):
     h, added = validate_anchor(history, report, calendar, now)
-    tail = prefix(tail, pd.Timestamp(report))
-    overlap = sessions(calendar, h.index[-1] - pd.Timedelta(days=60), h.index[-1])[-OVERLAP_SESSIONS:]
-    if (len(overlap) != OVERLAP_SESSIONS or len(overlap.difference(h.index))
+    if allow_sparse_overlap:
+        tail = tail.copy()
+        tail.index = pd.DatetimeIndex(tail.index)
+        tail = tail.loc[tail.index <= report]
+        if (tail.index.tz is not None or tail.index.hasnans or tail.index.has_duplicates
+                or not tail.index.equals(tail.index.normalize())):
+            raise TailUnavailable("Invalid/duplicate daily ^NDX reference dates")
+        # Missing *new* closes always fail. Historical missing closes are not
+        # imputed: the matching price continues to come exclusively from FRED.
+        missing_values = tail.index[tail.isna()]
+        if len(missing_values.difference(h.index)):
+            raise TailUnavailable("Missing new ^NDX close outside the FRED anchor")
+        tail = prefix(tail.dropna(), pd.Timestamp(report))
+        window = sessions(calendar, h.index[-1] - pd.Timedelta(days=60), h.index[-1])[
+            -(OVERLAP_SESSIONS + MAX_UNAVAILABLE_OVERLAP):]
+        unavailable = window.difference(tail.index)
+        overlap = window.intersection(tail.index)
+        if len(unavailable) > MAX_UNAVAILABLE_OVERLAP or len(overlap) < OVERLAP_SESSIONS:
+            raise TailUnavailable("Need at least 20 verified overlapping closes in the last 25 sessions")
+    else:
+        tail = prefix(tail, pd.Timestamp(report))
+        overlap = sessions(calendar, h.index[-1] - pd.Timedelta(days=60), h.index[-1])[-OVERLAP_SESSIONS:]
+        unavailable = pd.DatetimeIndex([])
+    if (len(overlap) < OVERLAP_SESSIONS or len(overlap.difference(h.index))
             or len(overlap.difference(tail.index)) or len(added.difference(tail.index))):
-        raise TailUnavailable("Need 20 consecutive overlapping closes and every missing tail session")
+        raise TailUnavailable("Need 20 overlapping closes and every missing tail session")
+    # Compare EVERY available close in the window, not a cherry-picked subset.
     error = float(np.max(np.abs(h.loc[overlap].to_numpy() / tail.loc[overlap].to_numpy() - 1)))
     if not np.isfinite(error) or error > MAX_RELATIVE_ERROR:
         raise TailUnavailable(f"FRED/Yahoo ^NDX overlap mismatch: {error:.6%}")
-    # Preserve ALL FRED values; overlap only validates identity/scale, never overwrites history.
-    out = pd.concat([h, tail.loc[added]]).rename("NDX")
+    addition = tail.loc[added].copy()
+    addition.index = addition.index.as_unit(h.index.unit)
+    out = pd.concat([h, addition]).rename("NDX")
     detail = {"method": "FRED_anchor_append_only", "anchor_end": str(h.index[-1].date()),
-              "overlap_sessions": len(overlap), "max_relative_overlap_error": error,
+              "overlap_sessions": len(overlap), "minimum_overlap_sessions": OVERLAP_SESSIONS,
+              "max_relative_overlap_error": error,
+              "validation_policy": "scoped_fred_anchor_v2" if allow_sparse_overlap else "strict_v1",
+              "unavailable_yahoo_overlap_dates": [str(d.date()) for d in unavailable],
+              "retained_fred_closes": {str(d.date()): float(h.loc[d]) for d in unavailable},
               "appended": {str(d.date()): float(tail.loc[d]) for d in added}}
     return out, detail
 
@@ -131,8 +191,8 @@ def fetch_tail(session, history, report, audit, calendar, now=None):
             r = session.get(url, params=params, timeout=(8, 25))
             r.raise_for_status()
             raw = r.json()
-            tail = daily_ndx(raw, pd.Timestamp(report), calendar, now)
-            result, detail = append_tail(h, tail, report, calendar, now)
+            tail = daily_ndx(raw, pd.Timestamp(report), calendar, now, anchor_end=h.index[-1])
+            result, detail = append_tail(h, tail, report, calendar, now, allow_sparse_overlap=True)
             detail.update(source=url, request="verified_ndx_tail", status="ok",
                           retrieved_at=utc(now).isoformat(),
                           response_sha256=hashlib.sha256(json.dumps(raw, sort_keys=True).encode()).hexdigest())
@@ -167,7 +227,8 @@ def probe(output_dir):
             record["withheld_latest_fred_row_for_probe"] = withheld
             prices = fetch_tail(session, anchor, report, record["attempts"], monitor._calendar())
             data.validate_asof(prices, report, "NDX fallback probe")
-            qqq = data.get_qqq(session, report, record["attempts"])
+            from qqq_recovery import get_qqq_reliable
+            qqq = get_qqq_reliable(session, report, record["attempts"])
             monitor.validate_cross_source(qqq, prices, report)
             pd.testing.assert_series_equal(prices.loc[anchor.index], anchor.rename("NDX"), check_freq=False)
             if withheld:

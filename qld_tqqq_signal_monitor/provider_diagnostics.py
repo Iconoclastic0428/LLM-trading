@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-import os
 
+import numpy as np
 import pandas as pd
 import requests
 from automation import latest_session
@@ -16,14 +16,17 @@ def main():
     finish = report.tz_localize('America/New_York') + pd.Timedelta(days=1)
     common = {'interval': '1d', 'events': 'div,splits', 'includePrePost': 'false'}
     base = 'https://query1.finance.yahoo.com/v8/finance/chart/QQQ'
+    bounded = dict(common, period1=int((finish-pd.Timedelta(days=90)).timestamp()), period2=int(finish.timestamp()))
     probes = [
         ('yahoo_full', base, dict(common, period1=920246400, period2=int(finish.timestamp()))),
-        ('yahoo_bounded90', base, dict(common, period1=int((finish-pd.Timedelta(days=90)).timestamp()), period2=int(finish.timestamp()))),
+        ('yahoo_bounded90', base, bounded),
         ('yahoo_range1mo', base, dict(common, range='1mo')),
         ('yahoo_range3mo', base, dict(common, range='3mo')),
         ('yahoo2_range3mo', base.replace('query1.', 'query2.'), dict(common, range='3mo')),
         ('nasdaq_history', 'https://api.nasdaq.com/api/quote/QQQ/historical',
          {'assetclass':'etf', 'fromdate':str((report-pd.Timedelta(days=90)).date()), 'todate':str(report.date()), 'limit':100}),
+        ('ndx_bounded90', base.replace('/QQQ', '/%5ENDX'), bounded),
+        ('ndx2_bounded90', base.replace('query1.', 'query2.').replace('/QQQ', '/%5ENDX'), bounded),
     ]
     records = []
     headers = {'User-Agent':'Mozilla/5.0', 'Accept':'application/json', 'Origin':'https://www.nasdaq.com',
@@ -42,8 +45,25 @@ def main():
                 result = j['chart']['result'][0]
                 ts = result.get('timestamp', [])
                 dates = pd.to_datetime(ts,unit='s',utc=True).tz_convert('America/New_York')
+                quote = result['indicators']['quote'][0]
                 record.update(rows=len(ts), latest_bar=str(dates[-1]), metadata=result.get('meta'),
-                              last_closes=result['indicators']['quote'][0]['close'][-3:])
+                              last_closes=quote['close'][-3:])
+                # Report offending rows without repairing, discarding or using them.
+                anomalies = []
+                for i, stamp in enumerate(dates):
+                    values = {k: quote.get(k, [None] * len(ts))[i] for k in ('open','high','low','close')}
+                    a = np.array(list(values.values()), dtype=float)
+                    reasons = []
+                    if not np.isfinite(a).all(): reasons.append('missing_or_nonfinite')
+                    elif (a <= 0).any(): reasons.append('nonpositive')
+                    else:
+                        o,h,l,c = a
+                        if l > h: reasons.append('low_above_high')
+                        if not l <= c <= h: reasons.append('close_outside_range')
+                        if not l <= o <= h: reasons.append('open_outside_range')
+                    if reasons:
+                        anomalies.append({'date':str(stamp.date()), 'values':values, 'reasons':reasons})
+                record['ohlc_anomalies'] = anomalies
             else:
                 record['sample'] = str(j)[:1600]
             record['status']='downloaded'
@@ -51,7 +71,14 @@ def main():
             record.update(status='error', error=str(exc))
         records.append(record)
         print(json.dumps(record, default=str))
-    # Public repository run metadata only, no credentials or arbitrary endpoints.
+    try:
+        import monitor
+        from reliable_data import http_session
+        with http_session() as session:
+            r = session.get(monitor.FRED_NDX_URL, timeout=(8,25)); r.raise_for_status()
+            (out/'fred_ndx.csv').write_text(r.text, encoding='utf-8')
+    except Exception as exc:
+        records.append({'name':'fred_ndx','error':str(exc)})
     try:
         r = requests.get('https://api.github.com/repos/Iconoclastic0428/LLM-trading/actions/runs',
                          params={'per_page':100}, timeout=(8,20))
