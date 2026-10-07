@@ -1,0 +1,62 @@
+name: Defensive allocation research data only
+on:
+  pull_request:
+    paths: ['.github/workflows/defensive-research-data.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  download:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch public historical market data; never publish strategy signals
+        run: |
+          python - <<'PY'
+          import concurrent.futures, datetime, hashlib, json, pathlib, re, urllib.request, urllib.parse
+          out=pathlib.Path('defensive_research_data'); out.mkdir(exist_ok=True)
+          headers={'User-Agent':'Mozilla/5.0','Accept':'application/json,text/html,*/*','Cache-Control':'no-cache'}
+          end=int(datetime.datetime(2026,8,29,tzinfo=datetime.timezone.utc).timestamp())
+          def request(url):
+              r=urllib.request.urlopen(urllib.request.Request(url,headers=headers),timeout=30)
+              data=r.read(20000000)
+              return data,dict(r.headers),r.geturl()
+          def ticker(sym):
+              attempts=[]
+              for host in ['query1.finance.yahoo.com','query2.finance.yahoo.com']:
+                  url='https://'+host+'/v8/finance/chart/'+urllib.parse.quote(sym)+'?'+urllib.parse.urlencode({'period1':0,'period2':end,'interval':'1d','events':'div,splits','includePrePost':'false'})
+                  try:
+                      data,h,u=request(url); p=json.loads(data); r=p['chart']['result'][0]
+                      assert r['meta']['symbol']==sym and len(r['timestamp'])>20
+                      (out/(sym+'.json')).write_bytes(data)
+                      return {'symbol':sym,'status':'downloaded','url':u,'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest(),'rows':len(r['timestamp']),'first_epoch':r['timestamp'][0],'last_epoch':r['timestamp'][-1],'headers':{k:v for k,v in h.items() if k.lower() in ['date','age','last-modified']},'attempts':attempts}
+                  except Exception as exc: attempts.append({'url':url,'error':str(exc)})
+              return {'symbol':sym,'status':'error','attempts':attempts}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+              records=list(pool.map(ticker,['KMLM','DBMF','BTAL','GLD','SGOV','BIL','QQQ','TQQQ','QLD']))
+          pages=[('gold_fred.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?id=GOLDPMGBD228NLBM'),('kmlm_deck_page.html','https://engage.kraneshares.com/s/1435f652/kmlm-presentation/?ks_product=kmlm&p_num=18'),('kmlm_issuer.html','https://kraneshares.com/etf/kmlm/'),('btal_issuer.html','https://www.agf.com/us/products/btal/'),('mtlucas.html','https://www.mtlucas.com/mlm-index/')]
+          for name,url in pages:
+              try:
+                  data,h,u=request(url);(out/name).write_bytes(data)
+                  records.append({'file':name,'status':'downloaded','url':u,'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+                  if 'deck_page' in name:
+                      text=data.decode(errors='replace')
+                      links=list(dict.fromkeys(re.findall(r'https?[^\s\"<>]+?\.pdf(?:\?[^\s\"<>]*)?',text)))
+                      (out/'deck_links.json').write_text(json.dumps(links,indent=2))
+                      for n,link in enumerate(links[:6]):
+                          try:
+                              b,_,u=request(link);(out/f'kmlm_deck_{n}.pdf').write_bytes(b)
+                              records.append({'file':f'kmlm_deck_{n}.pdf','status':'downloaded','url':u,'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+                          except Exception as exc: records.append({'url':link,'error':str(exc)})
+              except Exception as exc:records.append({'file':name,'url':url,'status':'error','error':str(exc)})
+          manifest={'purpose':'historical research only','cutoff':'2026-08-28','at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'production_changed':False,'records':records}
+          (out/'manifest.json').write_text(json.dumps(manifest,indent=2))
+          print(json.dumps(manifest,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: defensive-research-data-${{ github.run_id }}
+          path: defensive_research_data/
+          retention-days: 30
