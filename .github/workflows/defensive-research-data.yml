@@ -9,32 +9,30 @@ jobs:
   download:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 6
     steps:
-      - name: Retrieve gold fixing and missing research inputs
+      - name: Retrieve public historical export forms and gold fixing
         run: |
           python - <<'PY'
           import concurrent.futures,datetime,hashlib,json,pathlib,urllib.request,urllib.parse
-          out=pathlib.Path('gold_core_sources');out.mkdir(exist_ok=True)
+          out=pathlib.Path('archive_sources');out.mkdir(exist_ok=True)
           sources=[
-           ('gold_bbk.csv','https://api.statistiken.bundesbank.de/rest/download/BBEX3/D.XAU.USD.EA.AC.C05?format=csv&lang=en'),
-           ('gold_bbk_sdmx.csv','https://api.statistiken.bundesbank.de/rest/data/BBEX3/D.XAU.USD.EA.AC.C05?format=csv'),
-           ('gold_bbk_legacy.csv','https://www.bundesbank.de/statistic-rmi/StatisticDownload?tsId=BBEX3.D.XAU.USD.EA.AC.C05&its_csvFormat=en&mode=its'),
-           ('fred_ndx_recent.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQ100&cosd=2026-08-01'),
-           ('fred_bill_recent.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?id=DTB3&cosd=2026-08-01'),
-           ('fred_bill_monthly.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?id=TB3MS&cosd=1985-01-01'),
-           ('barclay_cta.html','https://portal.barclayhedge.com/cgi-bin/indices/displayIndices.cgi?indexID=cta'),
-           ('barclay_btop.html','https://portal.barclayhedge.com/cgi-bin/indices/displayHfIndex.cgi?indexCat=Barclay-Investable-Benchmarks&indexName=BTOP50-Index'),
-           ('barclay_sg.html','https://portal.barclayhedge.com/cgi-bin/indices/displayIndices.cgi?indexID=sg')]
-          sources.append(('NDX.json','https://query1.finance.yahoo.com/v8/finance/chart/%5ENDX?'+urllib.parse.urlencode({'period1':1777593600,'period2':int(datetime.datetime.now(datetime.timezone.utc).timestamp()),'interval':'1d','events':'div,splits','includePrePost':'false'})))
+           ('boe_gold.csv','https://www.bankofengland.co.uk/boeapps/database/_iadb-fromshowcolumns.asp?csv.x=yes&Datefrom=01/Jan/1970&Dateto=07/Oct/2026&SeriesCodes=XUDLGPD&CSVF=TN&UsingCodes=Y&VPD=Y&VFD=N',None),
+           ('boe_gold_old.csv','https://www.bankofengland.co.uk/boeapps/database/_iadb-fromshowcolumns.asp?csv.x=yes&Datefrom=01/Jan/1970&Dateto=31/Dec/2005&SeriesCodes=XUDLGPD&CSVF=TN&UsingCodes=Y&VPD=Y&VFD=N',None),
+           ('btop_monthly.xls','https://portal.barclayhedge.com/cgi-bin/barclay_stats/bcndx.cgi',{'dump':'excel','prog_cod':'BTOP50','return_option':'since_inception'}),
+           ('btop_daily.xls','https://portal.barclayhedge.com/cgi-bin/barclay_stats/bcndx.cgi',{'dump':'excelDaily','prog_cod':'BTOP50','return_option':'since_inception'}),
+           ('treasury_bills2026.xml','https://home.treasury.gov/resource-center-data-chart-center/interest-rates/pages/xml?data=daily_treasury_bill_rates&field_tdr_date_value=2026',None),
+           ('goldhub.html','https://www.gold.org/goldhub/data/gold-prices',None),
+           ('bundesbank_gold_archive.csv','https://api.db.nomics.world/v22/series/BUBA/BBEX3/D.XAU.USD.EA.AC.C05?observations=1',None),
+           ('lbma_archive.json','https://api.db.nomics.world/v22/series/LBMA/gold_D_USD_PM?observations=1',None)]
           def get(item):
-           name,url=item;rec={'name':name,'url':url,'at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+           name,url,post=item;rec={'name':name,'url':url,'form':post,'at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
            try:
-            headers={'User-Agent':'Mozilla/5.0','Accept':'text/csv,application/json,*/*','Cache-Control':'no-cache'}
-            with urllib.request.urlopen(urllib.request.Request(url,headers=headers),timeout=50) as r:
-             b=r.read(20000001);assert len(b)<=20000000,'oversize';rec.update(http_status=r.status,content_type=r.headers.get('Content-Type'),final_url=r.url)
-            (out/name).write_bytes(b);rec.update(status='downloaded',bytes=len(b),sha256=hashlib.sha256(b).hexdigest())
-            if len(b)<800:rec['preview']=b.decode(errors='replace')
+            headers={'User-Agent':'Mozilla/5.0','Accept':'*/*','Referer':'https://portal.barclayhedge.com/'}
+            req=urllib.request.Request(url,data=urllib.parse.urlencode(post).encode() if post else None,headers=headers)
+            with urllib.request.urlopen(req,timeout=50) as r:
+             b=r.read(25000001);assert len(b)<=25000000,'oversize';rec.update(http_status=r.status,content_type=r.headers.get('Content-Type'),final_url=r.url)
+            (out/name).write_bytes(b);rec.update(status='downloaded',bytes=len(b),sha256=hashlib.sha256(b).hexdigest(),preview=b[:180].decode(errors='replace'))
            except Exception as e:rec.update(status='error',error=str(e))
            print(json.dumps(rec));return rec
           with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:records=list(pool.map(get,sources))
@@ -43,6 +41,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: gold-core-sources-${{ github.run_id }}
-          path: gold_core_sources/
+          name: archive-sources-${{ github.run_id }}
+          path: archive_sources/
           retention-days: 30
