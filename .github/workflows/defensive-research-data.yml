@@ -11,29 +11,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Read public KMLM investor-deck metadata; never submit registration
+      - name: Download public predecessor tables and gold observations only
         run: |
           python - <<'PY'
-          import datetime, hashlib, json, pathlib, urllib.request
-          out=pathlib.Path('index_sources');out.mkdir(exist_ok=True);records=[]
-          def get(url,name):
-              rec={'url':url,'file':name};records.append(rec)
+          import concurrent.futures, datetime, hashlib, json, pathlib, urllib.request
+          out=pathlib.Path('long_history_sources');out.mkdir(exist_ok=True)
+          links=[('kmlm_pitchbook_20260630.pdf','https://media.celero.io/users/6627/content/fcde4208c44d492e96ee9fff5dd9ef9a/original_file.pdf'),('gold_spot_stooq.csv','https://stooq.com/q/d/l/?s=xauusd&i=d&d1=19850101&d2=20041231'),('gold_fred_table.txt','https://fred.stlouisfed.org/data/GOLDPMGBD228NLBM.txt')]
+          def fetch(item):
+              name,url=item;rec={'url':url,'file':name}
               try:
-                  r=urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Accept':'application/json,*/*','doc-referer':'https://kraneshares.com/kmlm-managed-futures-faq/'}),timeout=35)
-                  data=r.read(35000000);(out/name).write_bytes(data);rec.update(status='downloaded',bytes=len(data),sha256=hashlib.sha256(data).hexdigest())
-                  return data
-              except Exception as exc:rec.update(status='error',error=str(exc));return None
-          raw=get('https://p2api.celero.io/api/shorten/1435f652/?ks_product=kmlm&p_num=18&viewer=true','shorten.json')
-          if raw:
-              j=json.loads(raw);data=j.get('data',j);restricted=any(data.get(k) is True for k in ['restrict_access','require_login','password_protected','requires_authentication'])
-              if restricted:records.append({'status':'stopped','reason':'public response marks access restricted; no login or registration attempted'})
-              elif data.get('content_uuid'):
-                  get('https://p2api.celero.io/api/content/'+str(data['content_uuid'])+'/','content.json')
-          (out/'manifest.json').write_text(json.dumps({'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'purpose':'public historical index source discovery only','records':records},indent=2));print((out/'manifest.json').read_text())
+                  r=urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Accept':'*/*'}),timeout=40);data=r.read(35000000);(out/name).write_bytes(data)
+                  rec.update(status='downloaded',bytes=len(data),sha256=hashlib.sha256(data).hexdigest())
+              except Exception as exc:rec.update(status='error',error=str(exc))
+              return rec
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:recs=list(pool.map(fetch,links))
+          manifest={'purpose':'read-only predecessor data; issuer viewer explicitly EVERYONE_ALLOWED; no registration submitted','at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'records':recs};(out/'manifest.json').write_text(json.dumps(manifest,indent=2));print(json.dumps(manifest,indent=2))
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: index-sources-${{ github.run_id }}
-          path: index_sources/
+          name: long-history-sources-${{ github.run_id }}
+          path: long_history_sources/
           retention-days: 30
