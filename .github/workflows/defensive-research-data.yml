@@ -9,61 +9,40 @@ jobs:
   download:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 7
     steps:
-      - name: Retrieve public dated historical proxies without changing production
+      - name: Retrieve gold fixing and missing research inputs
         run: |
           python - <<'PY'
-          import concurrent.futures,datetime,hashlib,html,json,pathlib,re,urllib.request,urllib.parse
-          out=pathlib.Path('long_proxy_sources');out.mkdir(exist_ok=True)
-          now=datetime.datetime.now(datetime.timezone.utc)
+          import concurrent.futures,datetime,hashlib,json,pathlib,urllib.request,urllib.parse
+          out=pathlib.Path('gold_core_sources');out.mkdir(exist_ok=True)
           sources=[
-           ('french_beta.zip','https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Portfolios_Formed_on_BETA_CSV.zip'),
-           ('french_factors.zip','https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_CSV.zip'),
-           ('aqr_tsmom.xlsx','https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Time-Series-Momentum-Factors-Monthly.xlsx'),
-           ('aqr_bab.xlsx','https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Betting-Against-Beta-Equity-Factors-Monthly.xlsx'),
-           ('aqr_tsmom_page.html','https://www.aqr.com/insights/datasets/time-series-momentum-factors-monthly'),
-           ('aqr_bab_page.html','https://www.aqr.com/insights/datasets/betting-against-beta-equity-factors-monthly'),
-           ('stooq_gold.csv','https://stooq.com/q/d/l/?s=xauusd&i=d&d1=19680101&d2=20261007'),
-           ('fred_gold.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?id=GOLDPMGBD228NLBM'),
-           ('fred_ndx.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQ100'),
-           ('fred_bill.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?id=DTB3'),
-           ('cboe_vix.csv','https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv'),
-           ('dbnomics_lbma.json','https://api.db.nomics.world/v22/series/LBMA/gold_D?limit=20'),
-           ('barclay_cta.html','https://portal.barclayhedge.com/cgi-bin/indices/displayHfIndex.cgi?indexCat=Barclay-CTA-Indices&indexName=Barclay-CTA-Index'),
-           ('barclay_btop.html','https://portal.barclayhedge.com/cgi-bin/indices/displayHfIndex.cgi?indexCat=Barclay-CTA-Indices&indexName=Barclay-BTOP50-Index'),
-           ('ion_indices.html','https://ionanalytics.com/barclayhedge/indices/'),
-           ('kmlm_issuer.html','https://kraneshares.com/etf/kmlm/'),
-           ('mlm.pdf','https://engage.kraneshares.com/users/6627/content/fcde4208c44d492e96ee9fff5dd9ef9a/original_file.pdf')]
-          for symbol in ['QLD','TQQQ','QQQ','KMLM','DBMF','BTAL','GLD','SGOV']:
-           url='https://query1.finance.yahoo.com/v8/finance/chart/'+symbol+'?'+urllib.parse.urlencode({'period1':0,'period2':int(now.timestamp()),'interval':'1d','events':'div,splits','includePrePost':'false'})
-           sources.append((symbol+'.json',url))
+           ('gold_bbk.csv','https://api.statistiken.bundesbank.de/rest/download/BBEX3/D.XAU.USD.EA.AC.C05?format=csv&lang=en'),
+           ('gold_bbk_sdmx.csv','https://api.statistiken.bundesbank.de/rest/data/BBEX3/D.XAU.USD.EA.AC.C05?format=csv'),
+           ('gold_bbk_legacy.csv','https://www.bundesbank.de/statistic-rmi/StatisticDownload?tsId=BBEX3.D.XAU.USD.EA.AC.C05&its_csvFormat=en&mode=its'),
+           ('fred_ndx_recent.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQ100&cosd=2026-08-01'),
+           ('fred_bill_recent.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?id=DTB3&cosd=2026-08-01'),
+           ('fred_bill_monthly.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?id=TB3MS&cosd=1985-01-01'),
+           ('barclay_cta.html','https://portal.barclayhedge.com/cgi-bin/indices/displayIndices.cgi?indexID=cta'),
+           ('barclay_btop.html','https://portal.barclayhedge.com/cgi-bin/indices/displayHfIndex.cgi?indexCat=Barclay-Investable-Benchmarks&indexName=BTOP50-Index'),
+           ('barclay_sg.html','https://portal.barclayhedge.com/cgi-bin/indices/displayIndices.cgi?indexID=sg')]
+          sources.append(('NDX.json','https://query1.finance.yahoo.com/v8/finance/chart/%5ENDX?'+urllib.parse.urlencode({'period1':1777593600,'period2':int(datetime.datetime.now(datetime.timezone.utc).timestamp()),'interval':'1d','events':'div,splits','includePrePost':'false'})))
           def get(item):
            name,url=item;rec={'name':name,'url':url,'at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
            try:
-            req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Accept':'*/*','Cache-Control':'no-cache'})
-            with urllib.request.urlopen(req,timeout=35) as r:
+            headers={'User-Agent':'Mozilla/5.0','Accept':'text/csv,application/json,*/*','Cache-Control':'no-cache'}
+            with urllib.request.urlopen(urllib.request.Request(url,headers=headers),timeout=50) as r:
              b=r.read(20000001);assert len(b)<=20000000,'oversize';rec.update(http_status=r.status,content_type=r.headers.get('Content-Type'),final_url=r.url)
             (out/name).write_bytes(b);rec.update(status='downloaded',bytes=len(b),sha256=hashlib.sha256(b).hexdigest())
-            if name.endswith('.html'):
-             text=b.decode('utf-8',errors='replace');rec['data_links']=[html.unescape(x) for x in re.findall(r'(?:href|src)=[\"\x27]([^\"\x27]+)',text) if any(y in x.lower() for y in ('.xlsx','.xls','.csv','btop','displayhfindex','chartdata'))][:60]
+            if len(b)<800:rec['preview']=b.decode(errors='replace')
            except Exception as e:rec.update(status='error',error=str(e))
            print(json.dumps(rec));return rec
-          with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:records=list(pool.map(get,sources))
-          # Download explicit spreadsheet links found on the AQR public pages only.
-          follow=[]
-          for rec in records:
-           if rec['name'].startswith('aqr_') and rec['name'].endswith('.html'):
-            for i,link in enumerate(rec.get('data_links',[])[:6]):
-             url=urllib.parse.urljoin('https://www.aqr.com',link)
-             if urllib.parse.urlparse(url).hostname in ('www.aqr.com','aqr.com') and '.xls' in url.lower():follow.append((rec['name']+'_'+str(i)+'.xlsx',url))
-          if follow:
-           with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:records+=list(pool.map(get,follow))
-          (out/'manifest.json').write_text(json.dumps({'purpose':'historical research only, not production or trading','downloaded_at':now.isoformat(),'records':records},indent=2))
+          with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:records=list(pool.map(get,sources))
+          (out/'manifest.json').write_text(json.dumps(records,indent=2))
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: long-proxy-sources-${{ github.run_id }}
-          path: long_proxy_sources/
+          name: gold-core-sources-${{ github.run_id }}
+          path: gold_core_sources/
           retention-days: 30
