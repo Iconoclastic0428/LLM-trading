@@ -11,22 +11,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
-      - name: Retrieve current public Treasury yield observations
+      - name: Retrieve public BTAL source documents without generating signals
         run: |
           python - <<'PY'
-          import concurrent.futures,datetime,hashlib,json,pathlib,urllib.request,urllib.parse
-          out=pathlib.Path('bill_sources');out.mkdir(exist_ok=True)
+          import concurrent.futures,datetime,hashlib,json,pathlib,urllib.request
+          out=pathlib.Path('btal_sources');out.mkdir(exist_ok=True)
           sources=[
-           ('treasury.html','https://home.treasury.gov/resource-center-data-chart-center/interest-rates/TextView?type=daily_treasury_bill_rates&field_tdr_date_value=2026'),
-           ('treasury.xml','https://home.treasury.gov/resource-center-data-chart-center/interest-rates/pages/xml?data=daily_treasury_bill_rates&field_tdr_date_value=2026&page=0'),
-           ('fred_bill.txt','https://fred.stlouisfed.org/data/DTB3.txt'),
-           ('fred_bill_alternative.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?cosd=2026-08-01&coed=2026-10-07&id=DTB3'),
-           ('IRX.json','https://query1.finance.yahoo.com/v8/finance/chart/%5EIRX?'+urllib.parse.urlencode({'period1':1777593600,'period2':int(datetime.datetime.now(datetime.timezone.utc).timestamp()),'interval':'1d','includePrePost':'false'}))]
+           ('agf_nav_dist.xlsx','https://www.agf.com/agf-files/us/xlsx/web-nav-dist.xlsx'),
+           ('testfolio_help.html','https://testfol.io/help/'),
+           ('sp_index.html','https://www.spglobal.com/spdji/en/indices/dividends-factors/dow-jones-us-thematic-market-neutral-low-beta-index/'),
+           ('btal_prospectus.pdf','https://www.agf.com/agf-files/us/regulatory-documents/agf-trust-prospectus-us.pdf'),
+           ('btal_annual.html','https://www.sec.gov/Archives/edgar/data/1479599/000199937126019517/agf-ncsr_063026.htm')]
           def get(item):
            name,url=item;rec={'name':name,'url':url,'at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
            try:
             with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Accept':'*/*'}),timeout=40) as r:
-             b=r.read(6000000);rec.update(http_status=r.status,content_type=r.headers.get('Content-Type'))
+             b=r.read(18000000);rec.update(http_status=r.status,content_type=r.headers.get('Content-Type'))
             (out/name).write_bytes(b);rec.update(status='downloaded',bytes=len(b),sha256=hashlib.sha256(b).hexdigest())
            except Exception as e:rec.update(status='error',error=str(e))
            print(json.dumps(rec));return rec
@@ -36,6 +36,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: bill-sources-${{ github.run_id }}
-          path: bill_sources/
+          name: btal-sources-${{ github.run_id }}
+          path: btal_sources/
           retention-days: 30
