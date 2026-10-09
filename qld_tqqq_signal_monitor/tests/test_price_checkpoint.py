@@ -98,3 +98,9 @@ def test_workflow_cache_never_saves_replay_or_failed_generation():
  assert text.index('Publish signal and recovery status') < text.index('Save verified full-history checkpoint')
  assert 'caa296126883cff596d87d8935842f9db880ef25' in text
  assert 'verified-prices-v1-${{ github.run_id }}-${{ github.run_attempt }}' in text
+
+
+@pytest.mark.parametrize('message',['Observed daily close conflicts with finalized exchange close','Missing or conflicting explicitly finalized Nasdaq close'])
+def test_conflicting_live_observation_also_blocks_direct_restore(tmp_path,monkeypatch,message):
+ fixture(tmp_path,monkeypatch)
+ assert checkpoint.restore(REPORT,[{'error':message}],NOW) is None

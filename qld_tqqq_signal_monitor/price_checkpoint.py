@@ -88,6 +88,9 @@ def restore(report, audit, now=None):
         return None
     try:
         import reliable_data as data
+        failures = ' '.join(str(item.get('error', '')).lower() for item in audit)
+        if any(word in failures for word in ('conflict', 'mismatch', 'duplicate', 'wrong symbol', 'non-positive')):
+            raise ValueError('Observed live price or identity conflict forbids checkpoint recovery')
         if dest.is_symlink():
             raise ValueError('Checkpoint directory cannot be a symlink')
         doc = json.loads(_read(dest / 'manifest.json'))
@@ -114,6 +117,7 @@ def restore(report, audit, now=None):
             index.name = info['index_name']
             series = pd.Series(frame[label].to_numpy(), index=index, name=label)
             if (series.index.has_duplicates or not series.index.is_monotonic_increasing
+                    or not series.index.equals(series.index.normalize())
                     or series.index[-1] != report or series.isna().any()):
                 raise ValueError('Checkpoint has invalid dates or missing values')
             series = data.validate_asof(series, report, label)
