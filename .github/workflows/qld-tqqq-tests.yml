@@ -46,7 +46,6 @@ jobs:
     # This job cannot publish issues and never invokes publish_status.py.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 18
     steps:
       - name: Check out repository
@@ -71,7 +70,7 @@ jobs:
       - name: Exercise finalized QQQ close and checkpoint with real data
         timeout-minutes: 5
         run: python qld_tqqq_signal_monitor/closing_recovery_probe.py
-      - name: Exercise QQQ independent recovery with real data
+      - name: Verify daily-table fallback on a bounded common session and report current readiness
         timeout-minutes: 4
         run: python qld_tqqq_signal_monitor/qqq_recovery.py --probe-dir qqq_recovery_probe
       - name: Preserve smoke audit
@@ -93,3 +92,4 @@ jobs:
           if [ ! -f shadow_output/shadow.json ]; then echo "Shadow smoke did not produce a verified comparison." >> "$GITHUB_STEP_SUMMARY"; fi
           if [ -f ndx_fallback_probe/probe.json ]; then cat ndx_fallback_probe/probe.json >> "$GITHUB_STEP_SUMMARY"; fi
           if [ -f finalized_close_probe/probe.json ]; then cat finalized_close_probe/probe.json >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f qqq_recovery_probe/probe.json ]; then cat qqq_recovery_probe/probe.json >> "$GITHUB_STEP_SUMMARY"; fi
