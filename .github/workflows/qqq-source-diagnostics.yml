@@ -32,13 +32,18 @@ jobs:
             for name,extra in [('full',{'period1':920246400,'period2':int(finish.timestamp())}),('bounded90',{'period1':int((finish-datetime.timedelta(days=90)).timestamp()),'period2':int(finish.timestamp())}),('range3mo',{'range':'3mo'}),('range6mo',{'range':'6mo'})]:
               sources.append((host+'_'+name,base,{**common,**extra}))
           sources.append(('nasdaq','https://api.nasdaq.com/api/quote/QQQ/historical',{'assetclass':'etf','fromdate':str(date-datetime.timedelta(days=90)),'todate':str(date),'limit':100}))
+          sources.append(('stockanalysis','https://stockanalysis.com/etf/qqq/history/',{}))
+          sources.append(('stooq','https://stooq.com/q/d/l/',{'s':'qqq.us','i':'d','d1':str(date-datetime.timedelta(days=90)).replace('-',''),'d2':str(date).replace('-','')}))
           def get(item):
             name,url,params=item;url+='?'+urllib.parse.urlencode(params)
             record={'name':name,'url':url,'at':now.isoformat()}
             try:
               with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Accept':'application/json','Cache-Control':'no-cache'}),timeout=30) as r:
                 body=r.read(6000000);record.update(http_status=r.status,headers={k:v for k,v in r.headers.items() if k.lower() in ('date','age','cache-control')})
-              (out/(name+'.json')).write_bytes(body);obj=json.loads(body)
+              (out/(name+'.json')).write_bytes(body)
+              if name in ('stockanalysis','stooq'):
+                record.update(status='downloaded',sha256=hashlib.sha256(body).hexdigest(),bytes=len(body));return record
+              obj=json.loads(body)
               record.update(status='downloaded',sha256=hashlib.sha256(body).hexdigest(),bytes=len(body))
               if 'chart' in obj:
                 v=obj['chart']['result'][0];ts=v['timestamp'];q=v['indicators']['quote'][0]
