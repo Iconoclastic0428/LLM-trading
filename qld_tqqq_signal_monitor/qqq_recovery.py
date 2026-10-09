@@ -173,58 +173,9 @@ def get_qqq_reliable(session, report, audit):
 
 
 def probe(output_dir):
-    """Force actual Nasdaq fallback even when the primary has caught up, read-only."""
-    import reliable_data as data
-    from automation import latest_session
-    out = Path(output_dir); out.mkdir(parents=True, exist_ok=True)
-    report = latest_session()
-    record = {'status':'error','report_date':str(report.date()),'attempts':[],
-              'purpose':'read_only_QQQ_recovery_probe','execution_authorized':False}
-    code = 2
-    try:
-        with data.http_session() as session:
-            original = data.get_qqq(session, report, record['attempts'])
-            anchor = original.loc[original.index < report]
-            record['withheld_latest_yahoo_row_for_probe'] = True
-            result = fetch_tail(session, anchor, report, record['attempts'], monitor._calendar())
-            data.validate_asof(result, report, 'QQQ probe')
-            pd.testing.assert_series_equal(result.loc[anchor.index], anchor.rename('QQQ'),check_freq=False)
-            error = abs(result.loc[report]/original.loc[report]-1)
-            if error > TOLERANCE:
-                raise RecoveryError('QQQ withheld primary close disagrees with Nasdaq history')
-            # Exercise the actual load_prices entrypoint as though both Yahoo
-            # cache keys were stale, without mutating the live data source.
-            class StaleYahoo:
-                def get(self, url, **kwargs):
-                    response = session.get(url, **kwargs)
-                    if url in monitor.YAHOO_QQQ_URLS:
-                        raw = response.json()
-                        obj = raw['chart']['result'][0]
-                        mask = (pd.to_datetime(obj['timestamp'],unit='s',utc=True)
-                                .tz_convert('America/New_York').date < report.date())
-                        obj['timestamp'] = [x for x, keep in zip(obj['timestamp'],mask) if keep]
-                        for indicators in obj['indicators'].values():
-                            for item in indicators:
-                                for field, values in item.items():
-                                    item[field] = [x for x, keep in zip(values,mask) if keep]
-                        response._content = json.dumps(raw).encode()
-                    return response
-                def __enter__(self): return self
-                def __exit__(self, *args): return False
-            qqq, ndx = data.load_prices(report, record['attempts'], attempts=1, session_factory=StaleYahoo)
-            if 'Nasdaq' not in qqq.attrs.get('source',''):
-                raise RecoveryError('Forced end-to-end probe did not exercise Nasdaq recovery')
-            monitor.validate_cross_source(qqq,ndx,report)
-            pd.concat([qqq, ndx],axis=1).tail(300).to_csv(out/'verified_closes.csv', index_label='date')
-            record.update(status='ok', qqq_close=float(qqq.loc[report]),
-                          withheld_relative_error=float(error), end_to_end_fallback_exercised=True,
-                          qqq_source=qqq.attrs['source'],ndx_source=ndx.attrs.get('source'))
-            code = 0
-    except Exception as exc:
-        record['error'] = str(exc)
-    (out/'probe.json').write_text(json.dumps(record,indent=2,allow_nan=False)+'\n',encoding='utf-8')
-    print(json.dumps(record,indent=2))
-    return code
+    """Read-only bounded historical contract test; report live readiness separately."""
+    from historical_recovery_probe import probe as run_probe
+    return run_probe(output_dir)
 
 if __name__ == '__main__':
     import argparse
