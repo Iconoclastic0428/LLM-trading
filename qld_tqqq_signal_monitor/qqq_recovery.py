@@ -150,13 +150,19 @@ def get_qqq_reliable(session, report, audit):
             try:
                 r = session.get(url, params=params, timeout=(8,25))
                 r.raise_for_status()
-                history = data.chart_series(r.json()).loc[:report]
+                daily_payload = r.json()
+                history = data.chart_series(daily_payload).loc[:report]
                 audit.append({'source':url,'request':'qqq_recovery_anchor','latest':str(history.index[-1].date())})
                 # Provider may have caught up. Prefer original history when current.
                 try:
                     result = data.validate_asof(history, report, 'QQQ')
                 except data.DataUnavailable:
-                    result = fetch_tail(session, history, report, audit, monitor._calendar())
+                    try:
+                        result = fetch_tail(session, history, report, audit, monitor._calendar())
+                    except (requests.RequestException, ValueError, KeyError, TypeError, IndexError) as exc:
+                        audit.append({'request': 'qqq_nasdaq_daily_unavailable', 'error': str(exc)})
+                        from qqq_tail import fetch_closing
+                        result = fetch_closing(session, history, report, audit, monitor._calendar(), daily_payload)
                     return data.validate_asof(result, report, 'QQQ verified recovery')
                 result.attrs['source'] = url
                 return result

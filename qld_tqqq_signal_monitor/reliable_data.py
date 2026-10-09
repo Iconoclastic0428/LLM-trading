@@ -199,10 +199,19 @@ def load_prices(report: pd.Timestamp, audit: list[dict], attempts: int = 3,
                 qqq = get_qqq_reliable(session, report, audit)
                 ndx = get_ndx_reliable(session, report, audit)
                 monitor.validate_cross_source(qqq, ndx, report)
+                from price_checkpoint import save
+                save(qqq, ndx, report, audit)
                 return qqq, ndx
         except (requests.RequestException, monitor.MonitorError) as exc:
             audit.append({'attempt': attempt, 'error': str(exc)})
             if attempt == attempts:
+                from price_checkpoint import restore
+                # A checkpoint cannot overrule an observed identity/price conflict.
+                failures = ' '.join(str(x.get('error', '')).lower() for x in audit)
+                unsafe = ('mismatch', 'duplicate', 'wrong or missing', 'wrong symbol', 'non-positive')
+                cached = None if any(x in failures for x in unsafe) else restore(report, audit)
+                if cached is not None:
+                    return cached
                 raise DataUnavailable(f'Fresh inputs unavailable after {attempts} attempts: {exc}') from exc
             sleeper((20, 60)[min(attempt - 1, 1)])
     raise ValueError('attempts must be positive')
