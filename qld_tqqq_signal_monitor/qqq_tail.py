@@ -1,6 +1,6 @@
 """Recover a missing QQQ close from a dated, finalized exchange close.
 
-Last resort only: Nasdaq must explicitly label the SAME session 'Closed at',
+Last resort only: Nasdaq must identify the SAME session's finalized close,
 Yahoo must contain the whole regular 5-minute session AND its exact end marker,
 and the original complete history must agree with 20 Nasdaq historical closes.
 Never use after-hours prices, a generic last quote, NAV, or a guessed close.
@@ -40,6 +40,16 @@ def completed(report, calendar, now=None):
     return end
 
 
+def _closing_money(record):
+    money = str(record.get('lastSalePrice', ''))
+    if not re.fullmatch(r'\$\d[\d,]*\.\d{2}', money):
+        raise RecoveryError('Expected finite USD-cent regular closing price')
+    price = float(money[1:].replace(',', ''))
+    if not math.isfinite(price) or price <= 0:
+        raise RecoveryError('Invalid finalized close')
+    return price
+
+
 def exchange_close(payload, report, calendar, now=None):
     end = completed(report, calendar, now)
     data = payload.get('data') or {}
@@ -47,8 +57,8 @@ def exchange_close(payload, report, calendar, now=None):
             or data.get('assetClass') != 'ETF' or not str(data.get('exchange', '')).startswith('NASDAQ')):
         raise RecoveryError('Expected Nasdaq QQQ ETF close metadata')
     matched = []
-    # After hours the finalized regular close may be secondaryData. Never assume
-    # that primaryData is the close; it can be an actively changing extended quote.
+    # During extended trading, the explicit regular close is usually secondary.
+    # Never use primary merely because it has a price or a date.
     for slot in ('primaryData', 'secondaryData'):
         record = data.get(slot) or {}
         text = str(record.get('lastTradeTimestamp', ''))
@@ -58,15 +68,27 @@ def exchange_close(payload, report, calendar, now=None):
         stamp = pd.Timestamp(datetime.strptime(m[1], '%b %d, %Y %I:%M %p')).tz_localize('America/New_York')
         if utc(stamp) != end:
             raise RecoveryError('Nasdaq finalized close belongs to another session/time')
-        money = str(record.get('lastSalePrice', ''))
-        if not re.fullmatch(r'\$\d[\d,]*\.\d{2}', money):
-            raise RecoveryError('Expected finite USD-cent regular closing price')
-        price = float(money[1:].replace(',', ''))
-        if not math.isfinite(price) or price <= 0:
-            raise RecoveryError('Invalid finalized close')
-        matched.append((price, slot, text))
-    if not matched or len({v[0] for v in matched}) != 1:
-        raise RecoveryError('Missing or conflicting explicitly finalized Nasdaq close')
+        matched.append((_closing_money(record), slot, text))
+    # Captured Oct 8 after the extended session: Nasdaq transitions to Closed,
+    # removes secondaryData, and supplies a non-real-time date-only primary close.
+    # This exact state is accepted only with all independent session/OHL/overlap
+    # checks in fetch_closing. It does not attest an exchange timestamp by itself.
+    if (not matched and data.get('marketStatus') == 'Closed'
+            and data.get('secondaryData') is None):
+        record = data.get('primaryData') or {}
+        text = str(record.get('lastTradeTimestamp', ''))
+        if record.get('isRealTime') is False and re.fullmatch(r'[A-Z][a-z]{2} \d{1,2}, \d{4}', text):
+            stamped_day = pd.Timestamp(datetime.strptime(text, '%b %d, %Y'))
+            if stamped_day != pd.Timestamp(report):
+                raise RecoveryError('Nasdaq closed-market record belongs to another session')
+            matched.append((_closing_money(record), 'primaryData', 'Closed market; ' + text))
+    # Missing evidence is not a conflicting observed price. Keep these separate
+    # so absence can use a verified same-session checkpoint without permitting a
+    # checkpoint to overrule contradictory prices.
+    if not matched:
+        raise RecoveryError('Finalized Nasdaq closing record unavailable')
+    if len({v[0] for v in matched}) != 1:
+        raise RecoveryError('Conflicting finalized Nasdaq closing prices')
     return matched[0]
 
 
@@ -184,6 +206,7 @@ def fetch_closing(session, history, report, audit, calendar, daily_payload, now=
     result, detail = append_history(h, tail, report, calendar, now)
     detail.update(method='Nasdaq_dated_finalized_close_Yahoo_session_confirmation', request='qqq_finalized_recovery',
                   status='ok', selected_exchange_field=slot, exchange_close_label=label,
+                  exchange_record_type=('closed_market_date' if label.startswith('Closed market;') else 'explicit_close_timestamp'),
                   close=price, yahoo_end_marker=marker, regular_bars=len(bars)-1, daily_evidence=evidence)
     audit.append(detail)
     result.attrs['source'] = f'Yahoo QQQ through {h.index[-1].date()}; Nasdaq explicitly finalized {label}, confirmed by full Yahoo regular session'
