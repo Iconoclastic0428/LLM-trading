@@ -30,7 +30,9 @@ jobs:
           sources=[('yahoo_full',base,{**common,'period1':920246400,'period2':int(finish.timestamp())}),
                    ('yahoo_5d',base,{**common,'range':'5d'}),
                    ('yahoo_history',base,{'interval':'1d','range':'3mo','events':'history'}),
-                   ('yahoo_intraday',base,{'interval':'5m','range':'5d','includePrePost':'false'})]
+                   ('yahoo_intraday',base,{'interval':'5m','range':'1mo','includePrePost':'false'})]
+          sources.append(('nasdaq_info','https://api.nasdaq.com/api/quote/QQQ/info',{'assetclass':'etf'}))
+          sources.append(('nasdaq_summary','https://api.nasdaq.com/api/quote/QQQ/summary',{'assetclass':'etf'}))
           for kind in ['etf','stocks']:
             sources.append(('nasdaq_'+kind,'https://api.nasdaq.com/api/quote/QQQ/historical',{'assetclass':kind,'fromdate':str(date-datetime.timedelta(days=60)),'todate':str(date),'limit':100}))
           sources.extend([('stockanalysis_html','https://stockanalysis.com/etf/qqq/history/',{}),
