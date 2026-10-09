@@ -28,7 +28,7 @@ concurrency:
 jobs:
   signal:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 24
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -52,12 +52,25 @@ jobs:
       - name: Run tests
         if: steps.window.outputs.run == 'true'
         run: python -m pytest qld_tqqq_signal_monitor/tests -q
+      - name: Restore verified full-history checkpoint
+        if: steps.window.outputs.run == 'true' && !inputs.report_date
+        id: checkpoint
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: price_checkpoint/
+          key: verified-prices-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            verified-prices-v1-
       - name: Generate verified monthly signal
         if: steps.window.outputs.run == 'true'
         id: generate
         timeout-minutes: 10
         env:
           REPORT_DATE: ${{ inputs.report_date }}
+          PRICE_CHECKPOINT_DIR: ${{ !inputs.report_date && 'price_checkpoint' || '' }}
+          SOURCE_EVIDENCE_DIR: source_evidence
         shell: bash
         run: |
           args=()
@@ -119,6 +132,25 @@ jobs:
             echo "::warning::Shadow validation failed or timed out; BASE output is unchanged."
             echo "Shadow step outcome: $SHADOW_OUTCOME. No valid shadow target should be inferred." >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Save verified full-history checkpoint after production processing
+        if: always() && steps.generate.outcome == 'success' && !inputs.report_date
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: price_checkpoint/
+          key: verified-prices-v1-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Preserve source and checkpoint audit
+        if: always() && steps.window.outputs.run == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-price-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            source_evidence/
+            price_checkpoint/
+          if-no-files-found: warn
+          retention-days: 30
       - name: Preserve scheduler decision even when market-data work was skipped
         if: always()
         continue-on-error: true
