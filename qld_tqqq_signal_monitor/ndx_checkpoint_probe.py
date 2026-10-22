@@ -14,6 +14,21 @@ from ndx_fallback import utc
 from automation import latest_session
 
 
+def reference_source(ndx, report, now=None):
+    """Recover provenance from the validated manifest, not restore's display label."""
+    folder = cp.directory()
+    if folder is None:
+        raise ValueError('The probe needs its isolated verified checkpoint')
+    doc = json.loads(cp._read(folder / 'manifest.json'))
+    restored = cp.restore(report, [], now)
+    if restored is None:
+        raise ValueError('Current probe reference checkpoint failed revalidation')
+    pd.testing.assert_series_equal(restored[1], ndx, check_freq=False, check_exact=True)
+    if json.loads(cp._read(folder / 'manifest.json')) != doc:
+        raise ValueError('Reference checkpoint changed during validation')
+    return doc['prices']['NDX']['source']
+
+
 def probe(output_dir):
     out=Path(output_dir);out.mkdir(parents=True,exist_ok=True)
     report=latest_session();audit=[]
@@ -23,13 +38,14 @@ def probe(output_dir):
         # This reference is obtained by current production validation, not invented
         # or taken from a historical table lacking today's close.
         qqq,ndx=data.load_prices(report,audit,attempts=1)
+        source=reference_source(ndx,report)
         prior=monitor._normalize_sessions(monitor._calendar().sessions_in_range(report-pd.Timedelta(days=7),report))[-2]
         with TemporaryDirectory() as folder:
             os.environ['PRICE_CHECKPOINT_DIR']=folder
             h=ndx.loc[:prior].copy()
-            # Retain original FRED provenance from the current verified inputs.
-            if h.attrs.get('source')==monitor.FRED_NDX_URL:
-                h.attrs['source']=monitor.FRED_NDX_URL
+            # restore() adds a human-readable display label. Keep original
+            # provenance from the separately revalidated manifest in this test seed.
+            h.attrs['source']=source
             cp.save(qqq.loc[:prior],h,prior,audit)
             with data.http_session() as real:
                 class Outage:

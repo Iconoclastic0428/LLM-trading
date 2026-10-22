@@ -100,3 +100,25 @@ def test_earlier_cache_not_same_session_restore(case):
 def test_future_report_without_new_bar_rejected(case):
     folder,q,n,raw,S=case
     with pytest.raises(fb.TailUnavailable):nc.recover(S(),REPORT+pd.Timedelta(days=1),[],NOW)
+
+
+def test_probe_preserves_canonical_source_after_same_session_restore(case):
+    from ndx_checkpoint_probe import reference_source
+    folder,q,n,raw,S=case
+    n.attrs['source']='FRED NASDAQ100 through 2026-10-15; append-only daily ^NDX'
+    cp.save(q,n,REPORT,[],NOW)
+    restored=cp.restore(REPORT,[],NOW)[1]
+    assert restored.attrs['source'].startswith('Same-session verified checkpoint')
+    assert reference_source(restored,REPORT,NOW)==n.attrs['source']
+
+@pytest.mark.parametrize('bad',['date','bytes','values'])
+def test_probe_rejects_invalid_reference_before_seeding(case,bad):
+    from ndx_checkpoint_probe import reference_source
+    folder,q,n,raw,S=case;cp.save(q,n,REPORT,[],NOW)
+    if bad=='date':
+        p=folder/'manifest.json';doc=json.loads(p.read_text());doc['report_date']='2026-10-20';p.write_text(json.dumps(doc))
+    elif bad=='bytes':
+        p=folder/'NDX.csv';p.write_text(p.read_text()+'\n')
+    else:
+        n=n.copy();n.iloc[-1]*=1.01
+    with pytest.raises((ValueError,AssertionError)):reference_source(n,REPORT,NOW)
