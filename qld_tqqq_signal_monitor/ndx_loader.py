@@ -28,5 +28,14 @@ def get_ndx_reliable(session, report, audit):
         except (requests.RequestException, ValueError, KeyError, TypeError, IndexError,
                 data.DataUnavailable) as fallback_error:
             audit.append({"request": "ndx_fallback", "error": str(fallback_error)})
-            raise data.DataUnavailable(f"{primary_error}; fallback: {fallback_error}") from fallback_error
+            try:
+                from ndx_checkpoint import recover
+                return recover(session, report, audit)
+            except (OSError, requests.RequestException, ValueError, KeyError, TypeError,
+                    IndexError, data.DataUnavailable) as cached_error:
+                audit.append({"request": "ndx_checkpoint_live_append", "status": "unavailable",
+                              "error": str(cached_error)})
+                raise data.DataUnavailable(
+                    f"{primary_error}; fallback: {fallback_error}; cached anchor: {cached_error}"
+                ) from cached_error
 
