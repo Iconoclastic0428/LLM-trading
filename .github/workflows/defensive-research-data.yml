@@ -11,38 +11,43 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Retrieve public fund, index and financing records; no signals or orders
+      - name: Retrieve public IALT and broker documentation; no orders or production changes
         run: |
           python - <<'PY'
           import concurrent.futures,datetime,hashlib,json,pathlib,urllib.request,urllib.parse
-          out=pathlib.Path('bdmix_sources');out.mkdir(exist_ok=True)
-          end=int(datetime.datetime(2026,10,7,tzinfo=datetime.timezone.utc).timestamp())
+          out=pathlib.Path('ialt_sources');out.mkdir(exist_ok=True)
+          end=int(datetime.datetime(2026,10,22,tzinfo=datetime.timezone.utc).timestamp())
           sources=[]
-          for s in ['BDMIX','VMNFX','VMNIX','^NDX','^XNDX','NQ=F','^IRX','QQQ']:
-           for h in ['query1','query2']:
-            u='https://'+h+'.finance.yahoo.com/v8/finance/chart/'+urllib.parse.quote(s,safe='')+'?'+urllib.parse.urlencode({'period1':0,'period2':end,'interval':'1d','events':'div,splits,capitalGains','includePrePost':'false'})
-            sources.append((s.replace('^','').replace('=','_')+'_'+h+'.json',u))
-          for s in ['DFF','DTB3','DGS3MO','NASDAQ100','NASDAQXNDX']:
-           sources.append(('FRED_'+s+'.csv','https://fred.stlouisfed.org/graph/fredgraph.csv?id='+s))
-          sources += [('blackrock.html','https://www.blackrock.com/us/individual/products/249765/global-equity-market-neutral-fund-class-i'),('vanguard.html','https://advisors.vanguard.com/investments/products/vmnix/vanguard-market-neutral-fund-institutional-shares'),('cme_fairvalue.html','https://www.cmegroup.com/trading/equity-index/fairvalue.html'),('ibkr_futures.html','https://www.interactivebrokers.com/en/pricing/commissions-futures.php')]
+          for h in ['query1','query2']:
+           u='https://'+h+'.finance.yahoo.com/v8/finance/chart/IALT?'+urllib.parse.urlencode({'period1':0,'period2':end,'interval':'1d','events':'div,splits,capitalGains','includePrePost':'false'})
+           sources.append(('IALT_'+h+'.json',u))
+          sources += [
+            ('ialt_official.html','https://www.ishares.com/us/products/346898/ishares-systematic-alternatives-active-etf'),
+            ('ibkr_interest.html','https://www.interactivebrokers.com/en/trading/margin-calculation-details.php'),
+            ('ibkr_stock_margin.html','https://www.interactivebrokers.com/en/trading/margin-stocks.php?ex=us&hm=us&pm=1&rgt=1&rsk=0&rst=101004100808'),
+            ('ibkr_bond_margin.html','https://www.interactivebrokers.com/en/trading/margin-bonds.php?ex=us&hm=us&pm=0&rgt=1&rsk=0&rst=101004100808'),
+            ('ibkr_futures_margin.html','https://www.interactivebrokers.com/en/trading/margin-futures-fops.php'),
+            ('ibkr_sma.html','https://ibkrguides.com/reportingreference/reportguide/marginsummarymarginaccounts.htm'),
+            ('ibkr_fund_sweep.html','https://www.ibkrguides.com/orgportal/homemenu/excessfundssweep.htm'),
+            ('ibkr_margin_rates.html','https://www.interactivebrokers.com/en/trading/margin-rates.php')]
           def get(item):
            name,url=item;rec={'name':name,'url':url,'at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
            try:
             with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Accept':'*/*','Cache-Control':'no-cache'}),timeout=35) as r:
              b=r.read(18000000);rec.update(http_status=r.status,content_type=r.headers.get('Content-Type'))
             if name.endswith('.json'):
-             j=json.loads(b);obj=j['chart']['result'][0]
-             rec.update(symbol=obj['meta']['symbol'],rows=len(obj['timestamp']),dividends=len(obj.get('events',{}).get('dividends',{})),capital_gains=len(obj.get('events',{}).get('capitalGains',{})))
+             obj=json.loads(b)['chart']['result'][0];assert obj['meta']['symbol']=='IALT'
+             rec.update(symbol=obj['meta']['symbol'],rows=len(obj['timestamp']),dividends=len(obj.get('events',{}).get('dividends',{})))
             (out/name).write_bytes(b);rec.update(status='downloaded',bytes=len(b),sha256=hashlib.sha256(b).hexdigest())
            except Exception as e:rec.update(status='error',error=str(e))
            print(json.dumps(rec));return rec
           with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:records=list(pool.map(get,sources))
           (out/'manifest.json').write_text(json.dumps(records,indent=2))
-          assert all(any(r['name'].startswith(s+'_query') and r['status']=='downloaded' for r in records) for s in ['BDMIX','VMNFX','NDX'])
+          assert any(r['name'].startswith('IALT_') and r['status']=='downloaded' for r in records)
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: bdmix-sources-${{ github.run_id }}
-          path: bdmix_sources/
+          name: ialt-margin-sources-${{ github.run_id }}
+          path: ialt_sources/
           retention-days: 30
