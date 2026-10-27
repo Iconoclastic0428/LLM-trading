@@ -16,7 +16,6 @@ import price_checkpoint as cp
 import reliable_data as data
 from automation import latest_session
 from ndx_fallback import TailUnavailable, sessions, utc
-from ndx_loader import get_ndx_reliable
 from ndx_checkpoint_probe import reference_source
 
 
@@ -76,6 +75,7 @@ def probe(output_dir):
             record.update(status='ok',preserved_rows=len(history),
                           recovered_close=float(got.loc[report]),withheld_relative_error=rel,
                           anchor_date=str(prior.date()),source=got.attrs['source'],
+                          independent_evidence=[x for x in audit if x.get('request')=='ndx_dual_source_append' and x.get('status')=='ok'][-1],
                           cache_alone_rejected=True,full_loader_exercised=True)
             code = 0
     except Exception as exc:

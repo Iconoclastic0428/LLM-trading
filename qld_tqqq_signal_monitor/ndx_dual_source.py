@@ -1,7 +1,8 @@
 """Renew an NDX tail using Nasdaq historical OHLC AND Yahoo daily bars.
 
-Independent issuer evidence is mandatory on every new session. This does not
-extend the original five-session Yahoo-only allowance or reset the FRED origin.
+Fresh issuer history is mandatory on every run. A single latest Yahoo session
+may follow the independently confirmed issuer date; it is explicitly labelled.
+This does not extend the original FRED allowance or reset its origin.
 The existing full-history checkpoint validates the immutable earlier history;
 no shortened EMA seed, quotes, interpolation, rescaling or retrospective edits.
 """
@@ -98,11 +99,17 @@ def historical_ndx(payload, report, anchor, calendar, now=None):
     if not np.isfinite(close.to_numpy()).all() or (close <= 0).any():
         raise SourceConflict('Non-positive or non-finite Nasdaq historical close')
     frame['close'] = close
-    new = frame.loc[frame.index > anchor, ['open', 'high', 'low', 'close']].copy()
+    issuer_date = frame.index[-1]
+    minimum_date = sessions(calendar, report-pd.Timedelta(days=7), report)[-2]
+    if issuer_date < minimum_date:
+        raise TailUnavailable('Nasdaq history is more than one exchange session behind report')
+    # Recheck any previously provisional last checkpoint close as well as new
+    # rows. A present invalid current row must not be dropped in favour of yesterday.
+    new = frame.loc[frame.index >= anchor, ['open', 'high', 'low', 'close']].copy()
     for k in ('open', 'high', 'low', 'close'):
         new[k] = pd.to_numeric(new[k].astype(str).str.replace(',', '', regex=False), errors='raise')
     values = new.to_numpy(dtype=float)
-    if (new.empty or report not in new.index or not np.isfinite(values).all() or
+    if (new.empty or not np.isfinite(values).all() or
             (values <= 0).any() or (new.low > new.high).any() or
             (new.open < new.low).any() or (new.open > new.high).any() or
             (new.close < new.low).any() or (new.close > new.high).any()):
@@ -150,8 +157,21 @@ def recover(session, report, audit, now=None):
     check_response(official, report, cal, now)
     official_hash = evidence('ndx_nasdaq_' + str(report.date()) + '.json', official.content)
     issuer = historical_ndx(official.json(), report, h.index[-1], cal, now)
-    # Independently establish all new dates plus price-basis agreement with anchor.
-    _, issuer_detail = append_tail(h, issuer, report, cal, now, allow_sparse_overlap=True)
+    issuer_date = issuer.index[-1]
+    independently_added = added[added <= issuer_date]
+    reference_grid = sessions(cal, h.index[-1]-pd.Timedelta(days=60), h.index[-1])[-25:]
+    available = reference_grid.intersection(issuer.index)
+    if (len(available) < 20 or len(independently_added.difference(issuer.index)) or
+            h.index[-1] not in issuer.index):
+        raise TailUnavailable('Nasdaq must verify anchor and every added historical session')
+    ref_error = float(np.max(np.abs(h.loc[available].to_numpy()/issuer.loc[available].to_numpy()-1)))
+    if not np.isfinite(ref_error) or ref_error > TOLERANCE:
+        raise SourceConflict(f'Nasdaq/checkpoint NDX price mismatch: {ref_error:.6%}')
+    issuer_detail = {'verified_through': str(issuer_date.date()),
+                    'overlap_sessions': len(available), 'max_relative_overlap_error': ref_error}
+    unconfirmed = added[added > issuer_date]
+    if len(unconfirmed) > 1 or (len(unconfirmed) and unconfirmed[0] != report):
+        raise TailUnavailable('Only the latest report session may lack issuer history')
     finish = report.tz_localize('America/New_York') + pd.Timedelta(days=1)
     params = {'period1': int((finish-pd.Timedelta(days=90)).timestamp()),
               'period2': int(finish.timestamp()), 'interval': '1d',
@@ -167,8 +187,9 @@ def recover(session, report, audit, now=None):
             yahoo = daily_ndx(response.json(), report, cal, now, anchor_end=h.index[-1])
             result, detail = append_tail(h, yahoo, report, cal, now, allow_sparse_overlap=True)
             common = issuer.index.intersection(yahoo.dropna().index)
-            # Check every shared recent close, including EVERY appended session.
-            if len(common) < 20 + len(added) or len(added.difference(common)):
+            # Every shared prior close is checked. At most one explicitly marked
+            # current session may rely on complete finalized Yahoo daily OHLC.
+            if len(common) < 20 + len(independently_added) or len(independently_added.difference(common)):
                 raise TailUnavailable('Insufficient independent NDX overlap/new sessions')
             error = float(np.max(np.abs(yahoo.loc[common].to_numpy()/issuer.loc[common].to_numpy()-1)))
             if not np.isfinite(error) or error > TOLERANCE:
@@ -176,10 +197,14 @@ def recover(session, report, audit, now=None):
             result = data.validate_asof(result, report, 'NDX dual-source verified history')
             pd.testing.assert_series_equal(result.loc[h.index], h, check_freq=False, check_exact=True)
             result.attrs['source'] = (f'FRED NASDAQ100 through {origin.date()}; verified checkpoint through '
-                f'{h.index[-1].date()}; dual Nasdaq historical/Yahoo daily ^NDX through {report.date()}')
+                f'{h.index[-1].date()}; dual Nasdaq historical/Yahoo daily ^NDX through {issuer_date.date()}; '
+                f'Yahoo daily ^NDX through {report.date()}')
             audit.append({'request': 'ndx_dual_source_append', 'status': 'ok',
                 'report_date': str(report.date()), 'fred_origin_date': str(origin.date()),
                 'checkpoint_date': str(h.index[-1].date()), 'preserved_rows': len(h),
+                'independently_verified_through': str(issuer_date.date()),
+                'single_source_latest_dates': [str(d.date()) for d in unconfirmed],
+                'current_close_independently_confirmed': len(unconfirmed) == 0,
                 'appended_dates': [str(d.date()) for d in added],
                 'appended': {str(d.date()): float(result.loc[d]) for d in added},
                 'independent_overlap_count': len(common), 'max_independent_error': error,

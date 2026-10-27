@@ -75,7 +75,7 @@ def test_prolonged_outage_preserves_every_historical_value(case):
 
 @pytest.mark.parametrize('change',[
     'issuer_symbol','issuer_schema','issuer_duplicate','issuer_non_session','issuer_negative',
-    'issuer_old_conflict','issuer_new_conflict','issuer_missing_today','issuer_missing_middle',
+    'issuer_old_conflict','issuer_new_conflict','issuer_two_sessions_late','issuer_missing_middle',
     'issuer_bad_ohlc','issuer_nan','issuer_status','issuer_offline','yahoo_symbol',
     'yahoo_granularity','yahoo_preclose','yahoo_future_clock','yahoo_old_conflict',
     'yahoo_new_ohlc','yahoo_missing_today','issuer_overlap_missing','yahoo_overlap_missing',
@@ -92,7 +92,7 @@ def test_bad_evidence_never_creates_new_prices(case,change):
     elif change=='issuer_old_conflict':rows[-8]['close']=str(float(rows[-8]['close'])*1.01)
     elif change=='issuer_new_conflict':
         rows[-1]['close']=str(float(rows[-1]['close'])*1.001);rows[-1]['high']=str(float(rows[-1]['close'])+1)
-    elif change=='issuer_missing_today':rows.pop()
+    elif change=='issuer_two_sessions_late':del rows[-2:]
     elif change=='issuer_missing_middle':rows.pop(-2)
     elif change=='issuer_bad_ohlc':rows[-1]['low']=str(float(rows[-1]['high'])+1)
     elif change=='issuer_nan':rows[-1]['close']='NaN'
@@ -179,3 +179,53 @@ def test_second_extension_needs_fresh_independent_evidence(case):
 def test_checkpoint_gap_above_five_sessions_is_still_rejected(case):
     with pytest.raises(TailUnavailable):
         dual.recover(case[-1],pd.Timestamp('2026-11-02'),[],pd.Timestamp('2026-11-02T23:00Z'))
+
+
+def test_one_session_issuer_lag_is_explicit_and_never_claims_dual_confirmation(case):
+    path,q,n,state,s=case
+    state['nasdaq']['data']['tradesTable']['rows'].pop()
+    audit=[];got=dual.recover(s,REPORT,audit,NOW)
+    pd.testing.assert_series_equal(got,n,check_freq=False,check_exact=True)
+    assert audit[-1]['independently_verified_through']=='2026-10-23'
+    assert audit[-1]['single_source_latest_dates']==['2026-10-26']
+    assert audit[-1]['current_close_independently_confirmed'] is False
+    assert 'through 2026-10-15;' in got.attrs['source']
+
+
+def test_yesterday_issuer_date_can_equal_checkpoint_but_cannot_lag_it(case):
+    path,q,n,state,s=case
+    seed=pd.Timestamp('2026-10-23')
+    cp.save(q.loc[:seed],n.loc[:seed],seed,[],pd.Timestamp('2026-10-23T22:00Z'))
+    state['nasdaq']['data']['tradesTable']['rows'].pop()
+    audit=[];got=dual.recover(s,REPORT,audit,NOW)
+    assert audit[-1]['preserved_rows']==len(n.loc[:seed])
+    assert audit[-1]['single_source_latest_dates']==['2026-10-26']
+    pd.testing.assert_series_equal(got,n,check_freq=False,check_exact=True)
+
+
+def test_second_day_cannot_roll_forward_lagging_official_date(case):
+    path,q,n,state,s=case
+    state['nasdaq']['data']['tradesTable']['rows'].pop()
+    got=dual.recover(s,REPORT,[],NOW)
+    cp.save(q,got,REPORT,[],NOW)
+    # Issuer remains Friday; a Tuesday report requires at least Monday issuer data.
+    state['headers']['Date']='Wed, 28 Oct 2026 11:59:00 GMT'
+    with pytest.raises(TailUnavailable,match='more than one'):
+        dual.recover(s,pd.Timestamp('2026-10-27'),[],pd.Timestamp('2026-10-28T12:00Z'))
+
+
+@pytest.mark.parametrize('field,value',[('close','bad'),('open','NaN'),('low','0')])
+def test_present_bad_current_row_cannot_fall_back_to_prior_issuer_date(case,field,value):
+    path,q,n,state,s=case
+    state['nasdaq']['data']['tradesTable']['rows'][-1][field]=value
+    with pytest.raises(ValueError):dual.recover(s,REPORT,[],NOW)
+
+
+def test_new_issuer_correction_to_provisional_cache_close_blocks_recovery(case):
+    path,q,n,state,s=case
+    seed=pd.Timestamp('2026-10-23')
+    cp.save(q.loc[:seed],n.loc[:seed],seed,[],pd.Timestamp('2026-10-23T22:00Z'))
+    row=state['nasdaq']['data']['tradesTable']['rows'][-2]
+    row['close']=str(float(row['close'])*1.001);row['high']=str(float(row['close'])+10)
+    with pytest.raises(dual.SourceConflict,match='mismatch'):
+        dual.recover(s,REPORT,[],NOW)
