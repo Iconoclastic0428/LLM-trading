@@ -79,6 +79,9 @@ jobs:
       - name: Exercise FRED transport outage and validated live NDX append
         timeout-minutes: 5
         run: python qld_tqqq_signal_monitor/ndx_checkpoint_probe.py --probe-dir ndx_fallback_probe
+      - name: Exercise prolonged FRED outage with independent Nasdaq and Yahoo evidence
+        timeout-minutes: 5
+        run: python qld_tqqq_signal_monitor/ndx_dual_source_probe.py
       - name: Seed the isolated QQQ probe with validated input history
         run: |
           mkdir -p finalized_close_probe/checkpoint
@@ -98,6 +101,7 @@ jobs:
             shadow_base_audit/
             shadow_output/
             ndx_fallback_probe/
+            ndx_dual_source_probe/
             qqq_recovery_probe/
             finalized_close_probe/
           retention-days: 30
@@ -109,3 +113,4 @@ jobs:
           if [ -f ndx_fallback_probe/probe.json ]; then cat ndx_fallback_probe/probe.json >> "$GITHUB_STEP_SUMMARY"; fi
           if [ -f finalized_close_probe/probe.json ]; then cat finalized_close_probe/probe.json >> "$GITHUB_STEP_SUMMARY"; fi
           if [ -f qqq_recovery_probe/probe.json ]; then cat qqq_recovery_probe/probe.json >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f ndx_dual_source_probe/probe.json ]; then cat ndx_dual_source_probe/probe.json >> "$GITHUB_STEP_SUMMARY"; fi
