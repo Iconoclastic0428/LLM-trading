@@ -1,0 +1,52 @@
+name: NDX prolonged outage diagnostic
+on:
+  push:
+    branches: [fix/ndx-prolonged-outage-20261027]
+    paths: [.github/workflows/ndx-outage-diagnostic.yml]
+permissions:
+  contents: read
+jobs:
+  sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Capture public source bytes and exact checked-out code
+        run: |
+          python - <<'PY'
+          from concurrent.futures import ThreadPoolExecutor
+          import datetime,hashlib,json,pathlib,urllib.request,shutil
+          out=pathlib.Path('ndx_outage_capture');out.mkdir()
+          shutil.copytree('qld_tqqq_signal_monitor',out/'source/qld_tqqq_signal_monitor')
+          shutil.copytree('.github/workflows',out/'source/.github/workflows')
+          urls={
+           'fred_csv':'https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQ100',
+           'fred_txt':'https://fred.stlouisfed.org/data/NASDAQ100.txt',
+           'fred_xls':'https://fred.stlouisfed.org/graph/fredgraph.xls?id=NASDAQ100',
+           'nasdaq_quote_history':'https://api.nasdaq.com/api/quote/NDX/historical?assetclass=index&fromdate=2026-08-01&todate=2026-10-26&limit=120',
+           'nasdaq_index_history':'https://api.nasdaq.com/api/index/NDX/historical?fromdate=2026-08-01&todate=2026-10-26&limit=120',
+           'nasdaq_index_page':'https://indexes.nasdaq.com/Index/History/NDX',
+           'yahoo_ndx':'https://query1.finance.yahoo.com/v8/finance/chart/%5ENDX?range=3mo&interval=1d&includePrePost=false',
+          }
+          def get(pair):
+           name,url=pair;rec={'name':name,'url':url,'at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+           try:
+            req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Accept':'*/*','Origin':'https://www.nasdaq.com','Referer':'https://www.nasdaq.com/','Cache-Control':'no-cache'})
+            with urllib.request.urlopen(req,timeout=20) as r:
+             b=r.read(6000001);rec.update(status=r.status,headers=dict(r.headers))
+            if len(b)>6000000:raise ValueError('response too large')
+            (out/(name+'.raw')).write_bytes(b)
+            rec.update(bytes=len(b),sha256=hashlib.sha256(b).hexdigest())
+           except Exception as exc:rec['error']=str(exc)
+           print(json.dumps(rec));return rec
+          with ThreadPoolExecutor(max_workers=7) as ex:records=list(ex.map(get,urls.items()))
+          (out/'manifest.json').write_text(json.dumps(records,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ndx-outage-source-${{ github.run_id }}
+          path: ndx_outage_capture/
+          retention-days: 30
