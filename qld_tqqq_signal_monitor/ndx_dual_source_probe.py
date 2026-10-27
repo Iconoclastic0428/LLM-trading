@@ -16,6 +16,7 @@ import price_checkpoint as cp
 import reliable_data as data
 from automation import latest_session
 from ndx_fallback import TailUnavailable, sessions, utc
+from ndx_loader import get_ndx_reliable
 from ndx_checkpoint_probe import reference_source
 
 
