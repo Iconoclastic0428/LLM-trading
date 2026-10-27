@@ -35,7 +35,18 @@ def get_ndx_reliable(session, report, audit):
                     IndexError, data.DataUnavailable) as cached_error:
                 audit.append({"request": "ndx_checkpoint_live_append", "status": "unavailable",
                               "error": str(cached_error)})
-                raise data.DataUnavailable(
-                    f"{primary_error}; fallback: {fallback_error}; cached anchor: {cached_error}"
-                ) from cached_error
+                try:
+                    # A separate, stronger contract for prolonged outages: every
+                    # new close needs independent Nasdaq AND Yahoo daily evidence.
+                    # The five-session Yahoo-only FRED allowance remains unchanged.
+                    from ndx_dual_source import recover as recover_dual
+                    return recover_dual(session, report, audit)
+                except (OSError, requests.RequestException, ValueError, KeyError,
+                        TypeError, IndexError, data.DataUnavailable) as dual_error:
+                    audit.append({"request": "ndx_dual_source_append", "status": "unavailable",
+                                  "error": str(dual_error)})
+                    raise data.DataUnavailable(
+                        f"{primary_error}; fallback: {fallback_error}; cached anchor: {cached_error}; "
+                        f"dual source: {dual_error}"
+                    ) from dual_error
 
