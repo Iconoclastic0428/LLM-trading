@@ -27,6 +27,7 @@ from qqq_recovery import RecoveryError, validate_anchor, append_history, parse_h
 INFO_URL = 'https://api.nasdaq.com/api/quote/QQQ/info'
 PRICE_TOLERANCE = 0.005  # Half-cent: allow float32 representation, not price disagreement.
 FIELDS = ('open', 'high', 'low', 'close')
+MAX_METADATA_LAG_SECONDS = 5  # Bounded metadata delay; never moves the price marker.
 
 
 def completed(report, calendar, now=None):
@@ -103,9 +104,25 @@ def yahoo_session(payload, report, calendar, now=None):
                 'exchangeTimezoneName': 'America/New_York', 'dataGranularity': '5m'}
     if any(meta.get(k) != v for k, v in required.items()):
         raise RecoveryError('Expected USD QQQ regular-session 5-minute bars')
-    tick = pd.Timestamp(meta['regularMarketTime'], unit='s', tz='UTC')
-    if tick != end:
-        raise RecoveryError('Yahoo regular-market timestamp is not the exact session close')
+    raw_tick = meta.get('regularMarketTime')
+    if isinstance(raw_tick, bool) or not isinstance(raw_tick, int):
+        raise RecoveryError('Invalid Yahoo regular-market timestamp')
+    tick = pd.Timestamp(raw_tick, unit='s', tz='UTC')
+    lag = (tick - end).total_seconds()
+    if not 0 <= lag <= MAX_METADATA_LAG_SECONDS:
+        raise RecoveryError('Yahoo regular-market timestamp is outside the bounded close window')
+    if lag:
+        # Oct 30: the exact 16:00 marker and Nasdaq close agree, but Yahoo's
+        # regularMarketTime is 16:00:01. Permit only bounded post-close metadata
+        # with an independently calendar-matched session. Prices still come
+        # from the exact marker and must match Nasdaq in fetch_closing.
+        period = (meta.get('currentTradingPeriod') or {}).get('regular') or {}
+        for key, expected in (('start', utc(calendar.session_open(pd.Timestamp(report)))),
+                              ('end', end)):
+            value = period.get(key)
+            if (isinstance(value, bool) or not isinstance(value, int)
+                    or pd.Timestamp(value, unit='s', tz='UTC') != expected):
+                raise RecoveryError('Delayed Yahoo metadata lacks a matching regular session')
     ts, q = obj['timestamp'], obj['indicators']['quote'][0]
     if not ts or any(len(q[k]) != len(ts) for k in (*FIELDS, 'volume')):
         raise RecoveryError('Intraday OHLCV lengths differ')
@@ -131,6 +148,8 @@ def yahoo_session(payload, report, calendar, now=None):
     price = float(marker.close)
     if not math.isfinite(meta_price) or abs(meta_price-price) > PRICE_TOLERANCE:
         raise RecoveryError('Yahoo regular closing marker conflicts with metadata')
+    f.attrs.update(regular_metadata_time=tick.isoformat(),
+                   regular_metadata_lag_seconds=int(lag), exact_marker_time=end.isoformat())
     return price, f
 
 
@@ -207,7 +226,10 @@ def fetch_closing(session, history, report, audit, calendar, daily_payload, now=
     detail.update(method='Nasdaq_dated_finalized_close_Yahoo_session_confirmation', request='qqq_finalized_recovery',
                   status='ok', selected_exchange_field=slot, exchange_close_label=label,
                   exchange_record_type=('closed_market_date' if label.startswith('Closed market;') else 'explicit_close_timestamp'),
-                  close=price, yahoo_end_marker=marker, regular_bars=len(bars)-1, daily_evidence=evidence)
+                  close=price, yahoo_end_marker=marker, regular_bars=len(bars)-1, daily_evidence=evidence,
+                  yahoo_regular_metadata_time=bars.attrs['regular_metadata_time'],
+                  yahoo_regular_metadata_lag_seconds=bars.attrs['regular_metadata_lag_seconds'],
+                  yahoo_exact_marker_time=bars.attrs['exact_marker_time'])
     audit.append(detail)
     result.attrs['source'] = f'Yahoo QQQ through {h.index[-1].date()}; Nasdaq explicitly finalized {label}, confirmed by full Yahoo regular session'
     return result
