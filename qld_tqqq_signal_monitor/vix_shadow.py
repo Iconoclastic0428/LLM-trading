@@ -86,13 +86,16 @@ def features(vix: pd.Series, sessions: pd.DatetimeIndex, signal_date) -> dict:
     }
 
 
-def targets(snapshot: dict, f: dict) -> dict:
+def targets(snapshot: dict, f: dict | None) -> dict:
     """Never edit the authoritative snapshot or increase a positive core target."""
-    if snapshot["signal_date"] != f["signal_date"]:
+    day(snapshot["signal_date"])
+    if f is not None and snapshot["signal_date"] != f["signal_date"]:
         raise ShadowError("Core/VIX signal dates do not match")
     score, vol = float(snapshot["trend_score"]), float(snapshot["realized_volatility"])
     if not (math.isfinite(score) and 0 <= score <= 1 and math.isfinite(vol) and vol > 0):
         raise ShadowError("Invalid core score or realized volatility")
+    if f is None and score == 0:
+        raise ShadowError("A zero core requires verified VIX history; overlay unavailable")
     products = snapshot["products"]
     if len(products) != 2 or {p["symbol"] for p in products} != set(LEVERAGES):
         raise ShadowError("Expected two alternative portfolios: QLD and TQQQ")
@@ -106,7 +109,9 @@ def targets(snapshot: dict, f: dict) -> dict:
                 or not 0 <= base <= 1 or abs(base - score * cap) > 1e-10):
             raise ShadowError("Core target is inconsistent with the frozen strategy")
         for model in result:
-            amp = 0.0 if model == "BASE" else float(f[model.lower() + "_amplitude"])
+            # With positive core the overlay is disabled by the frozen rule.
+            # A missing feature object means unavailable, never a measured zero.
+            amp = 0.0 if model == "BASE" or f is None else float(f[model.lower() + "_amplitude"])
             if not math.isfinite(amp) or not 0 <= amp <= 1:
                 raise ShadowError("Invalid overlay amplitude")
             extra = min(cap, 0.5 * amp / leverage) if score == 0 else 0.0
@@ -234,13 +239,20 @@ def render(payload: dict) -> str:
         lines.append(f'| {symbol} | {vals[0]:.4%} | {vals[1]:.4%} | {vals[2]:.4%} | '
                      f'{models["Q70"][symbol]["overlay_target"]:.4%} |')
     f = payload["vix_features"]
-    lines += ["", f'VIX {f["vix_close"]:.2f}；20日峰值 {f["peak20"]:.2f}；'
-              f'峰值历史分位 {f["peak_rank252"]:.2%}；Q70门槛通过 {f["q70_pass"]}。',
-              f'核心得分 {payload["core_score"]:.4f}；C20强度 {f["c20_amplitude"]:.6f}；'
-              f'Q70强度 {f["q70_amplitude"]:.6f}。',
-              "QLD与TQQQ为两个替代账户，不把两者目标相加。仅核心得分为零时允许增强。",
+    if f is None:
+        lines += ["", "VIX指标尚未取得，峰值、分位与C20/Q70强度均不可用；没有将缺失值填成零。",
+                  f'核心得分 {payload["core_score"]:.4f} > 0，原规则禁止增强仓，三种目标因此等于已核验BASE。',
+                  "本次仅核验核心决定的仓位，不代表VIX行情或独立增强指标已核验成功。",
+                  f'VIX数据诊断：{payload["vix_error"]}']
+    else:
+        lines += ["", f'VIX {f["vix_close"]:.2f}；20日峰值 {f["peak20"]:.2f}；'
+                  f'峰值历史分位 {f["peak_rank252"]:.2%}；Q70门槛通过 {f["q70_pass"]}。',
+                  f'核心得分 {payload["core_score"]:.4f}；C20强度 {f["c20_amplitude"]:.6f}；'
+                  f'Q70强度 {f["q70_amplitude"]:.6f}。',
+                  f'VIX来源 {payload["vix_source"]["name"]}。']
+    lines += ["QLD与TQQQ为两个替代账户，不把两者目标相加。仅核心得分为零时允许增强。",
               "未模拟成交、费用或资金净值，不能把本报告当作已实现收益或前瞻回测。",
-              f'规则版本 `{RULE_VERSION}`；VIX来源 {payload["vix_source"]["name"]}。']
+              f'规则版本 `{RULE_VERSION}`。']
     return "\n".join(lines) + "\n"
 
 
@@ -264,16 +276,31 @@ def generate(base_dir: Path, output_dir: Path, *, enabled=True, now=None,
         if enabled:
             status, snapshot, grid, audit = verifier(base_dir, now)
             signal = snapshot["signal_date"]
-            vix, source = loader(signal, grid, payload["attempts"])
-            f = features(vix, grid, signal)
-            result = targets(snapshot, f)
-            used = dated_series(vix, signal).reindex(grid[-253:])
-            used.to_csv(output_dir / "vix_used.csv", index_label="date", header=["VIX"])
+            vix_error = None
+            try:
+                vix, source = loader(signal, grid, payload["attempts"])
+                f = features(vix, grid, signal)
+            except ShadowError as exc:
+                if snapshot.get("trend_score") == 0:
+                    raise  # Preserve the required-source error for zero core.
+                # Target invariance is independently provable for positive core.
+                # Zero core and invalid core schemas still fail inside targets.
+                result = targets(snapshot, None)
+                f, source, vix_hash = None, None, None
+                vix_error = str(exc)
+            else:
+                result = targets(snapshot, f)
+                used = dated_series(vix, signal).reindex(grid[-253:])
+                used.to_csv(output_dir / "vix_used.csv", index_label="date", header=["VIX"])
+                vix_hash = hashlib.sha256((output_dir / "vix_used.csv").read_bytes()).hexdigest()
             payload.update(status="ok", source_mode=status["mode"], report_date=status["report_date"],
                            signal_date=signal, reference_execution_date=audit["timing"]["execution_date"],
                            historical_target_only=True, core_score=snapshot["trend_score"],
                            vix_features=f, vix_source=source, models=result, production_audit=audit,
-                           vix_window_sha256=hashlib.sha256((output_dir / "vix_used.csv").read_bytes()).hexdigest())
+                           vix_window_sha256=vix_hash,
+                           vix_data_status="verified" if f is not None else "unavailable_not_required_for_positive_core",
+                           comparison_basis="verified_vix_and_core" if f is not None else "positive_core_overlay_disabled",
+                           vix_error=vix_error)
             # Never mutate the base bundle, even when a provider or future edit misbehaves.
             for name, digest in audit["sha256"].items():
                 if hashlib.sha256((base_dir / name).read_bytes()).hexdigest() != digest:
