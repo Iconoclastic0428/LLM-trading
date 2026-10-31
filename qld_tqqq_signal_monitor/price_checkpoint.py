@@ -95,8 +95,17 @@ def restore(report, audit, now=None):
             raise ValueError('Checkpoint directory cannot be a symlink')
         doc = json.loads(_read(dest / 'manifest.json'))
         report = pd.Timestamp(report)
-        if doc.get('version') != VERSION or doc.get('rules_sha256') != _rules_hash():
+        active_rules = _rules_hash()
+        stored_rules = doc.get('rules_sha256')
+        if doc.get('version') != VERSION:
             raise ValueError('Checkpoint contract does not match current code')
+        if stored_rules != active_rules:
+            # Exactly one reviewed predecessor: its stricter metadata clock
+            # accepted a subset of this release's closing evidence. Still run
+            # every byte, date, age, grid and cross-source check below.
+            from checkpoint_contract_compat import accepts_predecessor
+            if not accepts_predecessor(stored_rules, active_rules):
+                raise ValueError('Checkpoint contract does not match current code')
         if doc.get('report_date') != str(report.date()):
             raise ValueError('Checkpoint is not for the required report session')
         stamp, verified = utc(now), utc(doc['verified_at'])
@@ -127,7 +136,9 @@ def restore(report, audit, now=None):
         monitor.validate_cross_source(*values, report)
         audit.append({'request': 'checkpoint_restore', 'status': 'ok',
                       'report_date': str(report.date()), 'original_verified_at': doc['verified_at'],
-                      'original_run_id': doc['run_id'], 'new_market_observation': False})
+                      'original_run_id': doc['run_id'], 'new_market_observation': False,
+                      'original_rules_sha256': stored_rules, 'active_rules_sha256': active_rules,
+                      'reviewed_contract_transition': stored_rules != active_rules})
         return tuple(values)
     except (OSError, ValueError, KeyError, TypeError, IndexError, monitor.MonitorError) as exc:
         audit.append({'request': 'checkpoint_restore', 'status': 'unavailable', 'error': str(exc)})
